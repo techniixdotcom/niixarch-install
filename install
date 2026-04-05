@@ -2,8 +2,8 @@
 # ============================================================
 #  NiiX Arch Installer  //  arch.niiix.net
 #  Modes   : Dual-boot (Arch + Windows)  |  Single-boot (bare drive)
-#  Stack   : LUKS2 Â· Btrfs Â· Limine Â· CachyOS Â· GNOME
-#  Extras  : Auto GPU drivers Â· Gaming tools Â· Security hardening
+#  Stack   : LUKS2 · Btrfs · Limine · CachyOS · GNOME
+#  Extras  : Auto GPU drivers · Gaming tools · Security hardening
 #
 #  Requirements:
 #    - UEFI system (not legacy BIOS)
@@ -29,11 +29,11 @@
 
 set -uo pipefail
 
-# â”€â”€ Logging â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Logging ──────────────────────────────────────────────────
 LOGFILE="/root/niixarch-install-$(date +%Y%m%d-%H%M%S).log"
 exec > >(tee -a "$LOGFILE") 2>&1
 
-# â”€â”€ Colours â€” matched to arch.niiix.net palette â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Colours — matched to arch.niiix.net palette ─────────────
 #   GREEN  = neon green  #0aff9e  (256-colour: 118)
 #   PINK   = neon pink   #ff0a6c  (256-colour: 205)
 GREEN='\033[38;5;118m'
@@ -46,19 +46,19 @@ DIM='\033[2;37m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-# â”€â”€ Hardcoded preferences â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-KEYMAP="us"        # console keymap  (loadkeys / vconsole.conf) â€” set by gather_input
-KEYMAP_X11="us"    # X11/Wayland layout (localectl / XkbLayout) â€” set by gather_input
+# ── Hardcoded preferences ────────────────────────────────────
+KEYMAP="us"        # console keymap  (loadkeys / vconsole.conf) — set by gather_input
+KEYMAP_X11="us"    # X11/Wayland layout (localectl / XkbLayout) — set by gather_input
 LOCALE="en_GB.UTF-8"
 MIRROR_COUNTRY="Switzerland"
 MAPPER="cryptroot"
 BTRFS_OPTS="noatime,compress=zstd,space_cache=v2"
 
-# â”€â”€ Install mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Install mode ─────────────────────────────────────────────
 INSTALL_MODE=""    # "dualboot" | "singleboot"
 SINGLE_DRIVE=""    # target drive for single-boot (entire drive wiped)
 
-# â”€â”€ Detected at runtime â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Detected at runtime ──────────────────────────────────────
 EFI_PART=""
 EFI_DRIVE=""
 EFI_PART_NUM=""
@@ -66,41 +66,39 @@ TARGET_DRIVE=""
 LUKS_PART=""
 LUKS_UUID=""
 
-# â”€â”€ User input â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── User input ───────────────────────────────────────────────
 HOSTNAME=""; USERNAME=""; USER_PASS=""; LUKS_PASS=""; TIMEZONE=""
-WIFI_SSID=""; WIFI_PASS=""; WIFI_DETECTED=false
 FREE_START=""; FREE_END=""
 USE_MITIGATIONS=false
 
-# â”€â”€ Hardware (detected at runtime) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Hardware (detected at runtime) ───────────────────────────
 CPU_VENDOR=""; CPU_MODEL=""; GPU_VENDOR=""; GPU_MODEL=""; GPU_GEN=""
 MEM_TOTAL_GB=0; HAS_NVME=false; HAS_SSD=false
-IS_VM=false        # true when running inside a hypervisor
 
-# â”€â”€ Output helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-log()  { echo -e "  ${GREEN}âœ“${NC}  $*"; }
-warn() { echo -e "  ${YELLOW}âš ${NC}  $*"; }
+# ── Output helpers ──────────────────────────────────────────
+log()  { echo -e "  ${GREEN}✓${NC}  $*"; }
+warn() { echo -e "  ${YELLOW}⚠${NC}  $*"; }
 err()  {
-    echo -e "\n  ${RED}âœ—${NC}  ${RED}ERROR:${NC} $*"
+    echo -e "\n  ${RED}✗${NC}  ${RED}ERROR:${NC} $*"
     dump_state "ERROR: $*" 2>/dev/null || true
-    echo -e "  ${CYAN}Â·${NC}  Log saved to: ${LOGFILE}"
+    echo -e "  ${CYAN}·${NC}  Log saved to: ${LOGFILE}"
     exit 1
 }
-info() { echo -e "  ${CYAN}Â·${NC}  $*"; }
-ask()  { echo -e "\n  ${PINK}â–¸${NC}  ${WHITE}$*${NC}"; }
+info() { echo -e "  ${CYAN}·${NC}  $*"; }
+ask()  { echo -e "\n  ${PINK}▸${NC}  ${WHITE}$*${NC}"; }
 
-# Styled section header â€” called as: hr "Section Title"
+# Styled section header — called as: hr "Section Title"
 # Also works as hr (no title) for a plain divider
 hr() {
     echo
     if [[ -n "${1:-}" ]]; then
-        echo -e "  ${PINK}â—ˆ${NC}  ${WHITE}${BOLD}${1}${NC}"
+        echo -e "  ${PINK}◈${NC}  ${WHITE}${BOLD}${1}${NC}"
     fi
-    echo -e "  ${PINK}â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€${NC}"
+    echo -e "  ${PINK}────────────────────────────────────────────────${NC}"
     echo
 }
 
-# Debug helper â€” writes ONLY to log file, not to screen
+# Debug helper — writes ONLY to log file, not to screen
 dbg() {
     echo "[DBG $(date +%H:%M:%S)] $*" >> "$LOGFILE"
 }
@@ -110,10 +108,10 @@ dump_state() {
     local label="$1"
     {
         echo ""
-        echo "â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•"
+        echo "════════════════════════════════════════════════"
         echo "  DEBUG DUMP: $label"
         echo "  $(date)"
-        echo "â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•"
+        echo "════════════════════════════════════════════════"
         echo ""
         echo "--- lsblk -f ---"
         lsblk -f 2>&1 || true
@@ -141,7 +139,7 @@ dump_state() {
         echo "FREE_END=$FREE_END"
         echo "MAPPER=$MAPPER"
         echo ""
-        echo "â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•"
+        echo "════════════════════════════════════════════════"
         echo ""
     } >> "$LOGFILE" 2>&1
 }
@@ -150,14 +148,14 @@ dump_state() {
 is_removable() {
     local dev
     dev=$(basename "$1")
-    # Exclude loop devices, RAM disks, and device-mapper â€” these are never install targets
+    # Exclude loop devices, RAM disks, and device-mapper — these are never install targets
     [[ "$dev" == loop*  ]] && return 0
     [[ "$dev" == ram*   ]] && return 0
     [[ "$dev" == dm-*   ]] && return 0
     local rm_flag
     rm_flag=$(cat "/sys/block/${dev}/removable" 2>/dev/null || echo "0")
     [[ "$rm_flag" == "1" ]] && return 0
-    # Also check transport â€” USB drives may report RM=0
+    # Also check transport — USB drives may report RM=0
     local tran
     tran=$(lsblk -dn -o TRAN "/dev/$dev" 2>/dev/null | tr -d '[:space:]')
     [[ "$tran" == "usb" ]] && return 0
@@ -167,24 +165,24 @@ is_removable() {
 banner() {
     clear
     echo
-    # NiiX in neon green, Arch in neon pink â€” mirrors the website logo split
-    echo -e "${GREEN}  â–ˆâ–ˆâ–ˆâ•—   â–ˆâ–ˆâ•—â–ˆâ–ˆâ•—â–ˆâ–ˆâ•—â–ˆâ–ˆâ•—  â–ˆâ–ˆâ•— â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•— ${PINK}â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•—  â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•—â–ˆâ–ˆâ•—  â–ˆâ–ˆâ•—${NC}"
-    echo -e "${GREEN}  â–ˆâ–ˆâ–ˆâ–ˆâ•—  â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â•šâ–ˆâ–ˆâ•—â–ˆâ–ˆâ•”â•â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•—${PINK}â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•—â–ˆâ–ˆâ•”â•â•â•â•â•â–ˆâ–ˆâ•‘  â–ˆâ–ˆâ•‘${NC}"
-    echo -e "${GREEN}  â–ˆâ–ˆâ•”â–ˆâ–ˆâ•— â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘ â•šâ–ˆâ–ˆâ–ˆâ•”â• â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•‘${PINK}â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•”â•â–ˆâ–ˆâ•‘     â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•‘${NC}"
-    echo -e "${GREEN}  â–ˆâ–ˆâ•‘â•šâ–ˆâ–ˆâ•—â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘ â–ˆâ–ˆâ•”â–ˆâ–ˆâ•— â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•‘${PINK}â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•—â–ˆâ–ˆâ•‘     â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•‘${NC}"
-    echo -e "${GREEN}  â–ˆâ–ˆâ•‘ â•šâ–ˆâ–ˆâ–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•”â• â–ˆâ–ˆâ•—â–ˆâ–ˆâ•‘  â–ˆâ–ˆâ•‘${PINK}â–ˆâ–ˆâ•‘  â–ˆâ–ˆâ•‘â•šâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•—â–ˆâ–ˆâ•‘  â–ˆâ–ˆâ•‘${NC}"
-    echo -e "${GREEN}  â•šâ•â•  â•šâ•â•â•â•â•šâ•â•â•šâ•â•â•šâ•â•  â•šâ•â•â•šâ•â•  â•šâ•â•${PINK}â•šâ•â•  â•šâ•â• â•šâ•â•â•â•â•â•â•šâ•â•  â•šâ•â•${NC}"
+    # NiiX in neon green, Arch in neon pink — mirrors the website logo split
+    echo -e "${GREEN}  ███╗   ██╗██╗██╗██╗  ██╗ █████╗ ${PINK}██████╗  ██████╗██╗  ██╗${NC}"
+    echo -e "${GREEN}  ████╗  ██║██║██║╚██╗██╔╝██╔══██╗${PINK}██╔══██╗██╔════╝██║  ██║${NC}"
+    echo -e "${GREEN}  ██╔██╗ ██║██║██║ ╚███╔╝ ███████║${PINK}██████╔╝██║     ███████║${NC}"
+    echo -e "${GREEN}  ██║╚██╗██║██║██║ ██╔██╗ ██╔══██║${PINK}██╔══██╗██║     ██╔══██║${NC}"
+    echo -e "${GREEN}  ██║ ╚████║██║██║██╔╝ ██╗██║  ██║${PINK}██║  ██║╚██████╗██║  ██║${NC}"
+    echo -e "${GREEN}  ╚═╝  ╚═══╝╚═╝╚═╝╚═╝  ╚═╝╚═╝  ╚═╝${PINK}╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝${NC}"
     echo
-    echo -e "  ${DIM}luks2 Â· cachyos Â· limine Â· btrfs Â· gnome  //  installer${NC}"
-    echo -e "  ${PINK}â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€${NC}"
+    echo -e "  ${DIM}luks2 · cachyos · limine · btrfs · gnome  //  installer${NC}"
+    echo -e "  ${PINK}────────────────────────────────────────────────────────${NC}"
     echo
-    echo -e "  ${PINK}â—ˆ${NC}  ${WHITE}${BOLD}Required before running${NC}"
-    echo -e "  ${RED}âœ—${NC}  Secure Boot must be OFF in BIOS"
-    echo -e "  ${RED}âœ—${NC}  Limine does not support Secure Boot"
+    echo -e "  ${PINK}◈${NC}  ${WHITE}${BOLD}Required before running${NC}"
+    echo -e "  ${RED}✗${NC}  Secure Boot must be OFF in BIOS"
+    echo -e "  ${RED}✗${NC}  Limine does not support Secure Boot"
     echo
 }
 
-# â”€â”€ Hardware detection (runs from live ISO) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Hardware detection (runs from live ISO) ──────────────────
 detect_hardware() {
     hr "Hardware Detection"
     info "Detecting hardware..."
@@ -200,7 +198,7 @@ detect_hardware() {
     fi
     log "CPU: $CPU_MODEL ($CPU_VENDOR)"
 
-    # GPU â€” detect via lspci descriptions
+    # GPU — detect via lspci descriptions
     GPU_DESCS=$(lspci 2>/dev/null | grep -iE "VGA|3D|Display" | sed 's/.*: //')
     local has_nvidia has_amd has_intel
     has_nvidia=$(echo "$GPU_DESCS" | grep -ciE "NVIDIA" || true)
@@ -224,7 +222,7 @@ detect_hardware() {
     log "GPU: $GPU_MODEL ($GPU_VENDOR${GPU_GEN:+ $GPU_GEN})"
 
     [[ "$GPU_VENDOR" == "unknown" || -z "$GPU_VENDOR" ]] \
-        && warn "Could not detect GPU â€” drivers will need manual install"
+        && warn "Could not detect GPU — drivers will need manual install"
 
     # RAM
     local mem_kb
@@ -236,28 +234,15 @@ detect_hardware() {
     lsblk -d -o name,rota 2>/dev/null | grep -q "^nvme" && HAS_NVME=true
     lsblk -d -o name,rota 2>/dev/null | grep -q " 0$" && HAS_SSD=true
     log "Storage: NVMe=$HAS_NVME SSD=$HAS_SSD"
-
-    # â”€â”€ Hypervisor / VM detection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    local virt_type
-    virt_type=$(systemd-detect-virt 2>/dev/null || echo "none")
-    if [[ "$virt_type" != "none" ]]; then
-        IS_VM=true
-        log "Hypervisor detected: $virt_type"
-        warn "Running in a VM: gaming packages, hardware sensors,"
-        warn "and CPU-specific kernel params will be skipped or adjusted."
-    else
-        IS_VM=false
-        log "Bare metal confirmed"
-    fi
 }
 
-# â”€â”€ Step 0: Pre-flight checks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Step 0: Pre-flight checks ────────────────────────────────
 check_prereqs() {
     hr "Pre-flight Checks"
     info "Running pre-flight checks..."
 
     [ "$EUID" -eq 0 ]        || err "Please run as root"
-    [ -d /sys/firmware/efi ] || err "Not booted in UEFI mode â€” enable UEFI in BIOS"
+    [ -d /sys/firmware/efi ] || err "Not booted in UEFI mode — enable UEFI in BIOS"
 
     info "Checking internet connection..."
     ping -c 1 -W 3 archlinux.org &>/dev/null \
@@ -268,11 +253,11 @@ check_prereqs() {
     done
 
     loadkeys "$KEYMAP"   # load default (us) until user selects layout in gather_input
-    log "Keyboard: $KEYMAP (default â€” will be updated after layout selection)"
+    log "Keyboard: $KEYMAP (default — will be updated after layout selection)"
     log "All checks passed"
 }
 
-# â”€â”€ Step 1: Auto-detect EFI partition (internal drives only) â”€
+# ── Step 1: Auto-detect EFI partition (internal drives only) ─
 detect_efi() {
     hr "EFI Partition Detection"
     info "Detecting EFI System Partition..."
@@ -319,11 +304,11 @@ detect_efi() {
     log "EFI partition : $EFI_PART  ($EFI_SIZE)"
     log "EFI drive     : $EFI_DRIVE  (partition $EFI_PART_NUM)"
 
-    # Warn if EFI partition is small â€” kernels + initramfs need ~150 MiB
+    # Warn if EFI partition is small — kernels + initramfs need ~150 MiB
     EFI_SIZE_BYTES=$(lsblk -bno SIZE "$EFI_PART" 2>/dev/null | head -1 | tr -d '[:space:]')
     EFI_SIZE_BYTES=${EFI_SIZE_BYTES:-0}
     if [[ "$EFI_SIZE_BYTES" -lt 209715200 ]] 2>/dev/null; then   # < 200 MiB
-        warn "EFI partition is only $EFI_SIZE â€” this may be too small"
+        warn "EFI partition is only $EFI_SIZE — this may be too small"
         warn "for Linux kernels + initramfs. Consider resizing it first."
         ask "Continue anyway? (y/N):"
         read -rp "  > " efi_ok
@@ -331,7 +316,7 @@ detect_efi() {
     fi
 }
 
-# â”€â”€ Step 2: Find free space or offer partition deletion â”€â”€â”€â”€
+# ── Step 2: Find free space or offer partition deletion ────
 detect_free_spaces() {
     hr "Free Space / Partition Selection"
     info "Scanning internal drives for free space (>10 GiB)..."
@@ -340,7 +325,7 @@ detect_free_spaces() {
     FREE_SPACE_LIST=$(python3 <<'PYEOF'
 import subprocess
 
-# Get all disks â€” internal only (RM=0 and not USB transport)
+# Get all disks — internal only (RM=0 and not USB transport)
 try:
     raw = subprocess.check_output(
         ['lsblk', '-dn', '-o', 'PATH,TYPE,RM,TRAN'],
@@ -370,7 +355,7 @@ for drive in drives:
             stderr=subprocess.DEVNULL, text=True
         ).strip() or "Unknown"
 
-        # 5 second timeout â€” prevents hanging on odd drives
+        # 5 second timeout — prevents hanging on odd drives
         out = subprocess.check_output(
             ['timeout', '5', 'parted', '-m', drive, 'unit', 'MiB', 'print', 'free'],
             stderr=subprocess.DEVNULL, text=True
@@ -422,7 +407,7 @@ PYEOF
         return
     fi
 
-    # â”€â”€ No free space found â€” offer partition deletion â”€â”€â”€â”€â”€â”€
+    # ── No free space found — offer partition deletion ──────
     warn "No free space (>10 GiB) found on any internal drive."
     info "You can delete an existing partition to make room."
     echo
@@ -480,7 +465,7 @@ protected_guids = {
 entries = []
 for drive in drives:
     try:
-        # Use plain text output with explicit separator â€” more reliable than JSON
+        # Use plain text output with explicit separator — more reliable than JSON
         out = subprocess.check_output(
             ['lsblk', '-ln', '-o', 'PATH,SIZE,FSTYPE,PARTTYPE', drive],
             stderr=subprocess.DEVNULL, text=True
@@ -506,7 +491,7 @@ for drive in drives:
                 fstype = cols[2]
                 partguid = cols[3].lower()
             elif len(cols) == 3:
-                # Could be fstype or parttype â€” GUIDs have dashes
+                # Could be fstype or parttype — GUIDs have dashes
                 if '-' in cols[2] and len(cols[2]) > 30:
                     partguid = cols[2].lower()
                 else:
@@ -649,105 +634,16 @@ PYEOF
     log "Using freed space: $TARGET_DRIVE  (~${FREE_GiB%.*} GiB)"
 }
 
-# â”€â”€ WiFi detection (live ISO) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# Checks if the live ISO is connected via WiFi. If so, reads the SSID
-# from iwd and asks for the password so it can be written into the
-# installed system's NM profile â€” meaning it connects automatically
-# on first boot with no manual setup needed.
-detect_wifi() {
-    # Find the first wireless interface that is connected
-    local wlan_iface=""
-    local ssid=""
-
-    # iwd stores state under /var/lib/iwd â€” present on Arch live ISO
-    if command -v iwctl &>/dev/null; then
-        # Get the first connected station
-        wlan_iface=$(iwctl station list 2>/dev/null             | awk '/connected/{print $1}' | head -1)
-    fi
-
-    # Fallback: scan /sys for any wlan interface that has an associated AP
-    if [[ -z "$wlan_iface" ]]; then
-        for iface in /sys/class/net/wl*; do
-            [[ -d "$iface" ]] || continue
-            local name
-            name=$(basename "$iface")
-            if iw dev "$name" link 2>/dev/null | grep -q "SSID:"; then
-                wlan_iface="$name"
-                break
-            fi
-        done
-    fi
-
-    [[ -n "$wlan_iface" ]] || return 0   # not on WiFi â€” nothing to do
-
-    # Read current SSID
-    ssid=$(iwctl station "$wlan_iface" show 2>/dev/null         | awk '/Connected network/{print $NF}')
-
-    # Fallback SSID read via iw
-    if [[ -z "$ssid" ]]; then
-        ssid=$(iw dev "$wlan_iface" link 2>/dev/null             | awk '/SSID:/{print $2}')
-    fi
-
-    [[ -n "$ssid" ]] || return 0   # connected but can't read SSID
-
-    WIFI_DETECTED=true
-    WIFI_SSID="$ssid"
-
-    hr "WiFi Detected"
-    log "Connected via WiFi: ${WHITE}$ssid${NC}  (interface: $wlan_iface)"
-    info "The installer can save this network so your system"
-    info "connects automatically on first boot."
-    echo
-    echo -e "  ${GREEN}[1]${NC}  ${WHITE}Yes${NC}  â€” save WiFi credentials to installed system"
-    echo -e "  ${GREEN}[2]${NC}  ${WHITE}No${NC}   â€” skip  (set up WiFi manually after install)"
-    read -rp "  Choose [1/2]: " WIFI_SAVE_CHOICE
-
-    if [[ "$WIFI_SAVE_CHOICE" != "1" ]]; then
-        WIFI_DETECTED=false
-        info "WiFi credentials will not be saved."
-        return 0
-    fi
-
-    # Try to read the PSK from iwd's stored profile
-    # iwd stores profiles as /var/lib/iwd/<SSID>.psk (plain ini)
-    local iwd_profile="/var/lib/iwd/${ssid}.psk"
-    local psk=""
-    if [[ -f "$iwd_profile" ]]; then
-        psk=$(grep -i "^Passphrase=" "$iwd_profile" 2>/dev/null | cut -d= -f2-)
-    fi
-
-    if [[ -n "$psk" ]]; then
-        WIFI_PASS="$psk"
-        log "WiFi password read from iwd profile â€” no re-entry needed"
-    else
-        # iwd may store the PSK hashed â€” ask the user
-        echo
-        ask "WiFi password for "$ssid":"
-        read -rsp "  > " WIFI_PASS; echo
-        [[ -n "$WIFI_PASS" ]] || { warn "Empty password â€” WiFi credentials will not be saved."; WIFI_DETECTED=false; return 0; }
-        ask "Confirm WiFi password:"
-        read -rsp "  > " WIFI_PASS2; echo
-        if [[ "$WIFI_PASS" != "$WIFI_PASS2" ]]; then
-            warn "Passwords did not match â€” WiFi credentials will not be saved."
-            WIFI_DETECTED=false
-            WIFI_PASS=""
-            return 0
-        fi
-    fi
-
-    log "WiFi credentials captured for: $WIFI_SSID"
-}
-
-# â”€â”€ Step 3: Gather user input â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Step 3: Gather user input ────────────────────────────────
 gather_input() {
     hr "Installation Config"
     echo -e "  ${WHITE}${BOLD}Configure your NiiX Arch install:${NC}"
     echo
 
-    # â”€â”€ Keyboard layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Keyboard layout ──────────────────────────────────────
     echo -e "  ${WHITE}${BOLD}Keyboard Layout${NC}"
-    echo -e "  ${GREEN}[1]${NC}  ${WHITE}US${NC}              â€” English (US)"
-    echo -e "  ${GREEN}[2]${NC}  ${WHITE}Swiss German${NC}    â€” de_CH  (Ã¼ Ã¶ Ã¤)"
+    echo -e "  ${GREEN}[1]${NC}  ${WHITE}US${NC}              — English (US)"
+    echo -e "  ${GREEN}[2]${NC}  ${WHITE}Swiss German${NC}    — de_CH  (ü ö ä)"
     read -rp "  Choose [1/2]: " KB_CHOICE
     case "$KB_CHOICE" in
         2)
@@ -764,9 +660,6 @@ gather_input() {
 
     # Apply to the live ISO immediately so passwords can be typed correctly
     loadkeys "$KEYMAP"
-
-    # Detect WiFi and optionally capture credentials for the installed system
-    detect_wifi
 
     ask "Hostname (e.g. archbox):"
     read -rp "  > " HOSTNAME
@@ -785,7 +678,7 @@ gather_input() {
     [[ "$USER_PASS" == "$USER_PASS2" ]] || err "Passwords do not match"
 
     echo
-    warn "LUKS passphrase â€” typed every time you boot into Arch:"
+    warn "LUKS passphrase — typed every time you boot into Arch:"
     ask "LUKS passphrase:"
     read -rsp "  > " LUKS_PASS; echo
     [[ -n "$LUKS_PASS" ]] || err "LUKS passphrase cannot be empty"
@@ -803,8 +696,8 @@ gather_input() {
     echo
     echo -e "  ${WHITE}${BOLD}CPU Vulnerability Mitigations${NC}"
     echo -e "  ${DIM}Disabling gives ~5-10% more FPS but reduces side-channel protection.${NC}"
-    echo -e "  ${GREEN}[1]${NC}  ${WHITE}OFF${NC}  â€” Max performance  (mitigations=off)"
-    echo -e "  ${GREEN}[2]${NC}  ${WHITE}ON${NC}   â€” Keep protections  (safer for banking/crypto)"
+    echo -e "  ${GREEN}[1]${NC}  ${WHITE}OFF${NC}  — Max performance  (mitigations=off)"
+    echo -e "  ${GREEN}[2]${NC}  ${WHITE}ON${NC}   — Keep protections  (safer for banking/crypto)"
     read -rp "  Choose [1/2]: " MIT_CHOICE
     case "$MIT_CHOICE" in
         2) USE_MITIGATIONS=true;  log "Mitigations: ON" ;;
@@ -812,56 +705,53 @@ gather_input() {
     esac
 }
 
-# â”€â”€ Step 4: Confirm â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Step 4: Confirm ──────────────────────────────────────────
 confirm() {
     hr "Summary & Confirmation"
     echo -e "  ${WHITE}${BOLD}Review carefully before continuing:${NC}"
     echo
-    echo -e "  ${PINK}â”€â”€ Hardware â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€${NC}"
-    printf "  ${CYAN}Â·${NC}  %-22s ${WHITE}%s${NC}\n" "CPU:"  "$CPU_MODEL ($CPU_VENDOR)"
-    printf "  ${CYAN}Â·${NC}  %-22s ${WHITE}%s${NC}\n" "GPU:"  "$GPU_MODEL ($GPU_VENDOR)"
-    printf "  ${CYAN}Â·${NC}  %-22s ${WHITE}%s${NC}\n" "RAM:"  "~${MEM_TOTAL_GB}GB"
+    echo -e "  ${PINK}── Hardware ──────────────────────────────────────${NC}"
+    printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "CPU:"  "$CPU_MODEL ($CPU_VENDOR)"
+    printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "GPU:"  "$GPU_MODEL ($GPU_VENDOR)"
+    printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "RAM:"  "~${MEM_TOTAL_GB}GB"
     echo
-    echo -e "  ${PINK}â”€â”€ Install mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€${NC}"
+    echo -e "  ${PINK}── Install mode ──────────────────────────────────${NC}"
     if [[ "$INSTALL_MODE" == "dualboot" ]]; then
-        printf "  ${CYAN}Â·${NC}  %-22s ${WHITE}%s${NC}\n" "Mode:"            "Dual-boot  (Windows preserved)"
-        printf "  ${CYAN}Â·${NC}  %-22s ${WHITE}%s${NC}\n" "EFI (/boot):"     "$EFI_PART  (reused, NOT reformatted)"
-        printf "  ${CYAN}Â·${NC}  %-22s ${WHITE}%s${NC}\n" "New partition:"   "$TARGET_DRIVE  (free space)"
+        printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "Mode:"            "Dual-boot  (Windows preserved)"
+        printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "EFI (/boot):"     "$EFI_PART  (reused, NOT reformatted)"
+        printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "New partition:"   "$TARGET_DRIVE  (free space)"
     else
-        printf "  ${CYAN}Â·${NC}  %-22s ${WHITE}%s${NC}\n" "Mode:"            "Single-boot  (standalone Arch)"
-        printf "  ${RED}âœ—${NC}  %-22s ${RED}%s${NC}\n"   "WIPE target:"     "$SINGLE_DRIVE  â€” ENTIRE DRIVE WIPED"
-        printf "  ${CYAN}Â·${NC}  %-22s ${WHITE}%s${NC}\n" "EFI partition:"   "512 MiB  (new, created on $SINGLE_DRIVE)"
-        printf "  ${CYAN}Â·${NC}  %-22s ${WHITE}%s${NC}\n" "Root partition:"  "Remaining space on $SINGLE_DRIVE"
+        printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "Mode:"            "Single-boot  (standalone Arch)"
+        printf "  ${RED}✗${NC}  %-22s ${RED}%s${NC}\n"   "WIPE target:"     "$SINGLE_DRIVE  — ENTIRE DRIVE WIPED"
+        printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "EFI partition:"   "512 MiB  (new, created on $SINGLE_DRIVE)"
+        printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "Root partition:"  "Remaining space on $SINGLE_DRIVE"
     fi
     echo
-    echo -e "  ${PINK}â”€â”€ Configuration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€${NC}"
-    printf "  ${CYAN}Â·${NC}  %-22s ${WHITE}%s${NC}\n" "Bootloader:"    "Limine (UEFI)"
-    printf "  ${CYAN}Â·${NC}  %-22s ${WHITE}%s${NC}\n" "Keyboard:"      "$KEYMAP  (X11: $KEYMAP_X11)"
-    printf "  ${CYAN}Â·${NC}  %-22s ${WHITE}%s${NC}\n" "Kernel:"        "linux-cachyos (BORE â€” installed first-boot)"
-    printf "  ${CYAN}Â·${NC}  %-22s ${WHITE}%s${NC}\n" "Encryption:"    "LUKS2"
-    printf "  ${CYAN}Â·${NC}  %-22s ${WHITE}%s${NC}\n" "Filesystem:"    "Btrfs  Â·  @  @home  @snapshots  @var_log"
-    printf "  ${CYAN}Â·${NC}  %-22s ${WHITE}%s${NC}\n" "Swap:"          "ZRAM (zstd, auto-sized)"
-    printf "  ${CYAN}Â·${NC}  %-22s ${WHITE}%s${NC}\n" "Hostname:"      "$HOSTNAME"
-    printf "  ${CYAN}Â·${NC}  %-22s ${WHITE}%s${NC}\n" "Username:"      "$USERNAME"
-    printf "  ${CYAN}Â·${NC}  %-22s ${WHITE}%s${NC}\n" "Desktop:"       "GNOME"
-    printf "  ${CYAN}Â·${NC}  %-22s ${WHITE}%s${NC}\n" "Mitigations:"   "$([ "$USE_MITIGATIONS" = true ] && echo ON || echo OFF)"
-    if [[ "$WIFI_DETECTED" == true ]]; then
-        printf "  ${CYAN}Â·${NC}  %-22s ${WHITE}%s${NC}\n" "WiFi network:"  "$WIFI_SSID  (credentials saved)"
-    fi
+    echo -e "  ${PINK}── Configuration ─────────────────────────────────${NC}"
+    printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "Bootloader:"    "Limine (UEFI)"
+    printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "Keyboard:"      "$KEYMAP  (X11: $KEYMAP_X11)"
+    printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "Kernel:"        "linux-cachyos (BORE — installed first-boot)"
+    printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "Encryption:"    "LUKS2"
+    printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "Filesystem:"    "Btrfs  ·  @  @home  @snapshots  @var_log"
+    printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "Swap:"          "ZRAM (zstd, auto-sized)"
+    printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "Hostname:"      "$HOSTNAME"
+    printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "Username:"      "$USERNAME"
+    printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "Desktop:"       "GNOME"
+    printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "Mitigations:"   "$([ "$USE_MITIGATIONS" = true ] && echo ON || echo OFF)"
     echo
     if [[ "$INSTALL_MODE" == "dualboot" ]]; then
-        warn "Only the selected free space will be touched â€” Windows is safe."
+        warn "Only the selected free space will be touched — Windows is safe."
     else
         warn "ALL data on $SINGLE_DRIVE will be permanently destroyed."
         warn "This includes any OS, files, or partitions on that drive."
     fi
     echo
-    echo -e "  ${RED}${BOLD}Type  YES  (uppercase) to begin â€” this cannot be undone:${NC}"
+    echo -e "  ${RED}${BOLD}Type  YES  (uppercase) to begin — this cannot be undone:${NC}"
     read -rp "  > " CONFIRM_INPUT
     [[ "$CONFIRM_INPUT" == "YES" ]] || { echo "  Aborted. Nothing was changed."; exit 0; }
 }
 
-# â”€â”€ Step 5: Create partition in selected free space â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Step 5: Create partition in selected free space ──────────
 create_partition() {
     hr "Partition Creation"
     info "Creating partition on $TARGET_DRIVE..."
@@ -894,7 +784,7 @@ create_partition() {
     log "New partition: $LUKS_PART"
 }
 
-# â”€â”€ Step 6: LUKS2 encryption â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Step 6: LUKS2 encryption ─────────────────────────────────
 setup_luks() {
     hr "LUKS2 Encryption Setup"
     log "Formatting $LUKS_PART with LUKS2..."
@@ -918,7 +808,7 @@ setup_luks() {
     log "Container open at /dev/mapper/$MAPPER"
 }
 
-# â”€â”€ Step 7: Btrfs + subvolumes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Step 7: Btrfs + subvolumes ───────────────────────────────
 setup_btrfs() {
     hr "Btrfs Filesystem"
     log "Formatting /dev/mapper/$MAPPER as Btrfs..."
@@ -943,13 +833,13 @@ setup_btrfs() {
     log "Btrfs mounted"
 }
 
-# â”€â”€ Step 7b: Remove ALL traces of previous Arch/Limine â”€â”€â”€â”€â”€â”€
+# ── Step 7b: Remove ALL traces of previous Arch/Limine ──────
 clean_efi() {
     hr "EFI Partition Cleanup"
     info "Removing all traces of previous Arch/Limine installations..."
     info "(Windows and EFI/Microsoft files will NOT be touched)"
 
-    # â”€â”€ 1. Clean files from EFI partition â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── 1. Clean files from EFI partition ────────────────────
     # Kernels and initramfs (stock + cachyos)
     rm -f /mnt/boot/vmlinuz-linux*
     rm -f /mnt/boot/initramfs-linux*.img
@@ -975,7 +865,7 @@ clean_efi() {
 
     log "EFI partition cleaned"
 
-    # â”€â”€ 2. Remove old Limine/Arch UEFI boot entries â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── 2. Remove old Limine/Arch UEFI boot entries ─────────
     info "Cleaning old UEFI NVRAM boot entries..."
     while IFS= read -r bootnum; do
         efibootmgr -b "$bootnum" -B 2>/dev/null \
@@ -988,7 +878,7 @@ clean_efi() {
     log "UEFI NVRAM cleaned"
 }
 
-# â”€â”€ Step 8: Swiss mirrors & base install â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Step 8: Swiss mirrors & base install ─────────────────────
 install_base() {
     hr "Base System Install"
     info "Fetching fastest $MIRROR_COUNTRY mirrors..."
@@ -1000,7 +890,7 @@ install_base() {
             --sort rate \
             --save /etc/pacman.d/mirrorlist \
         && log "Mirrors updated" \
-        || warn "reflector failed â€” using default mirrors"
+        || warn "reflector failed — using default mirrors"
 
     # Write vconsole.conf BEFORE pacstrap so mkinitcpio's keymap hook doesn't error
     mkdir -p /mnt/etc
@@ -1019,10 +909,10 @@ install_base() {
     log "Base system installed"
 }
 
-# â”€â”€ CachyOS repo + kernel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# (CachyOS kernel installed during first-boot â€” needs live system for PGP keys)
+# ── CachyOS repo + kernel ────────────────────────────────────
+# (CachyOS kernel installed during first-boot — needs live system for PGP keys)
 
-# â”€â”€ GPU drivers (auto-detected) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── GPU drivers (auto-detected) ──────────────────────────────
 install_gpu_drivers() {
     hr "GPU Driver Install"
     info "Installing $GPU_VENDOR GPU drivers..."
@@ -1089,59 +979,26 @@ INTENV
             log "Intel GPU drivers installed"
             ;;
         *)
-            if [[ "$IS_VM" == true ]]; then
-                # Install appropriate guest drivers based on hypervisor
-                local virt_type
-                virt_type=$(systemd-detect-virt 2>/dev/null || echo "none")
-                case "$virt_type" in
-                    kvm|qemu)
-                        arch-chroot /mnt pacman -S --noconfirm --needed \
-                            mesa lib32-mesa \
-                            vulkan-virtio lib32-vulkan-virtio \
-                            vulkan-icd-loader lib32-vulkan-icd-loader \
-                            spice-vdagent \
-                            qemu-guest-agent
-                        arch-chroot /mnt systemctl enable qemu-guest-agent 2>/dev/null || true
-                        log "KVM/QEMU guest drivers installed (virtio-gpu + spice)"
-                        ;;
-                    vmware)
-                        arch-chroot /mnt pacman -S --noconfirm --needed \
-                            mesa lib32-mesa \
-                            open-vm-tools
-                        arch-chroot /mnt systemctl enable vmtoolsd 2>/dev/null || true
-                        log "VMware guest drivers installed (open-vm-tools)"
-                        ;;
-                    oracle)
-                        arch-chroot /mnt pacman -S --noconfirm --needed \
-                            mesa lib32-mesa \
-                            virtualbox-guest-utils
-                        arch-chroot /mnt systemctl enable vboxservice 2>/dev/null || true
-                        log "VirtualBox guest drivers installed"
-                        ;;
-                    *)
-                        arch-chroot /mnt pacman -S --noconfirm --needed \
-                            mesa lib32-mesa \
-                            vulkan-icd-loader lib32-vulkan-icd-loader
-                        log "Generic mesa drivers installed (unknown hypervisor: $virt_type)"
-                        ;;
-                esac
-            else
-                warn "Unknown GPU vendor â€” drivers will need manual install"
-            fi
+            warn "Unknown GPU vendor — skipping driver install"
             ;;
     esac
 }
 
-# â”€â”€ All pacman packages (gaming, security, tools) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── All pacman packages (gaming, security, tools) ────────────
 install_packages() {
     hr "Package Install"
     info "Installing packages (gaming, security, tools)..."
 
-    # Core packages â€” installed regardless of VM or bare metal
     arch-chroot /mnt pacman -S --noconfirm --needed \
         linux-headers \
+        gamemode lib32-gamemode mangohud lib32-mangohud \
+        ananicy-cpp \
+        steam \
+        lib32-alsa-plugins lib32-libpulse lib32-openal \
+        lib32-gst-plugins-base lib32-gst-plugins-good \
         ufw \
-        zram-generator \
+        zram-generator irqbalance \
+        power-profiles-daemon \
         flatpak \
         dnsmasq \
         snapper snap-pac \
@@ -1149,22 +1006,6 @@ install_packages() {
         fastfetch libva-utils dmidecode \
         gnome-shell-extension-appindicator \
         reflector
-
-    if [[ "$IS_VM" == false ]]; then
-        # Bare-metal only: gaming stack, hardware sensors, tablet support
-        arch-chroot /mnt pacman -S --noconfirm --needed \
-            gamemode lib32-gamemode mangohud lib32-mangohud \
-            ananicy-cpp \
-            steam \
-            lib32-alsa-plugins lib32-libpulse lib32-openal \
-            lib32-gst-plugins-base lib32-gst-plugins-good \
-            irqbalance \
-            power-profiles-daemon \
-            iio-sensor-proxy \
-            squeekboard
-    else
-        info "VM detected â€” skipping gaming stack, sensor daemons, and tablet packages"
-    fi
 
     # CPU microcode
     case "$CPU_VENDOR" in
@@ -1179,7 +1020,7 @@ install_packages() {
     log "All packages installed"
 }
 
-# â”€â”€ System configuration + tweaks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── System configuration + tweaks ────────────────────────────
 configure_system() {
     hr "System Configuration"
     log "Generating fstab..."
@@ -1192,7 +1033,7 @@ configure_system() {
 
     # (mkinitcpio.conf written and rebuilt by rebuild_initramfs after all packages)
 
-    # â”€â”€ Sysctl tuning (RAM-adaptive) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Sysctl tuning (RAM-adaptive) ─────────────────────────
     local swappiness=10
     [[ "$MEM_TOTAL_GB" -lt 24 ]] && swappiness=30
     [[ "$MEM_TOTAL_GB" -lt 12 ]] && swappiness=60
@@ -1209,26 +1050,26 @@ net.ipv4.tcp_congestion_control=bbr
 SYSEOF
     log "Sysctl tuned (swappiness=$swappiness for ${MEM_TOTAL_GB}GB RAM)"
 
-    # â”€â”€ Transparent hugepages â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Transparent hugepages ────────────────────────────────
     mkdir -p /mnt/etc/tmpfiles.d
     echo "w /sys/kernel/mm/transparent_hugepage/enabled - - - - madvise" \
         > /mnt/etc/tmpfiles.d/hugepages.conf
 
-    # â”€â”€ NVMe I/O scheduler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── NVMe I/O scheduler ───────────────────────────────────
     if [[ "$HAS_NVME" == true ]]; then
         mkdir -p /mnt/etc/udev/rules.d
         echo 'ACTION=="add|change", KERNEL=="nvme[0-9]n[0-9]", ATTR{queue/rotational}=="0", ATTR{queue/scheduler}="none"' \
             > /mnt/etc/udev/rules.d/60-nvme-scheduler.conf
     fi
 
-    # â”€â”€ SSD I/O scheduler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── SSD I/O scheduler ────────────────────────────────────
     if [[ "$HAS_SSD" == true ]]; then
         mkdir -p /mnt/etc/udev/rules.d
         echo 'ACTION=="add|change", KERNEL=="sd[a-z]", ATTR{queue/rotational}=="0", ATTR{queue/scheduler}="none"' \
             > /mnt/etc/udev/rules.d/60-ssd-scheduler.conf
     fi
 
-    # â”€â”€ ZRAM (auto-sized) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── ZRAM (auto-sized) ────────────────────────────────────
     local zram_frac="ram / 2"
     [[ "$MEM_TOTAL_GB" -le 8 ]] && zram_frac="ram"
     cat > /mnt/etc/systemd/zram-generator.conf <<ZRAMEOF
@@ -1237,18 +1078,18 @@ zram-size = $zram_frac
 compression-algorithm = zstd
 ZRAMEOF
 
-    # â”€â”€ Firewall (configure rules â€” ufw starts on boot via systemctl) â”€â”€
+    # ── Firewall (configure rules — ufw starts on boot via systemctl) ──
     arch-chroot /mnt bash <<'FWEOF'
 ufw default deny incoming 2>/dev/null || true
 ufw default allow outgoing 2>/dev/null || true
 ufw allow 27036:27037/tcp 2>/dev/null || true
 ufw allow 27031:27036/udp 2>/dev/null || true
-# Don't run 'ufw --force enable' in chroot â€” no iptables modules
+# Don't run 'ufw --force enable' in chroot — no iptables modules
 # ufw will start on boot via systemctl enable ufw
 FWEOF
 
-    # â”€â”€ MAC randomization (WiFi only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    # Ethernet is intentionally excluded â€” applying connection.stable-id
+    # ── MAC randomization (WiFi only) ───────────────────────────
+    # Ethernet is intentionally excluded — applying connection.stable-id
     # globally (with ${BOOT}) forces a new DHCP lease on every boot,
     # causing a ~10s stall before the network comes up.
     mkdir -p /mnt/etc/NetworkManager/conf.d
@@ -1263,47 +1104,12 @@ wifi.cloned-mac-address=random
 connection.stable-id=${CONNECTION}/${BOOT}
 MACEOF
 
-    # â”€â”€ WiFi auto-connect profile â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    # Write an NM keyfile for the WiFi network used during install so the
-    # installed system connects automatically on first boot â€” no manual setup.
-    if [[ "$WIFI_DETECTED" == true && -n "$WIFI_SSID" && -n "$WIFI_PASS" ]]; then
-        local nm_conn_dir="/mnt/etc/NetworkManager/system-connections"
-        mkdir -p "$nm_conn_dir"
-        # Sanitise SSID for use as a filename (replace / and spaces)
-        local safe_ssid
-        safe_ssid=$(echo "$WIFI_SSID" | tr '/' '-' | tr ' ' '_')
-        cat > "${nm_conn_dir}/${safe_ssid}.nmconnection" <<WIFIEOF
-[connection]
-id=${WIFI_SSID}
-type=wifi
-autoconnect=true
-
-[wifi]
-ssid=${WIFI_SSID}
-mode=infrastructure
-
-[wifi-security]
-key-mgmt=wpa-psk
-psk=${WIFI_PASS}
-
-[ipv4]
-method=auto
-
-[ipv6]
-method=auto
-addr-gen-mode=stable-privacy
-WIFIEOF
-        # NM requires exactly 600 on keyfiles â€” it will refuse to load them otherwise
-        chmod 600 "${nm_conn_dir}/${safe_ssid}.nmconnection"
-        log "WiFi profile written: $WIFI_SSID  (auto-connect on first boot)"
-    fi
-
-    # â”€â”€ NetworkManager DNS backend â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── NetworkManager DNS backend ───────────────────────────
     # Explicitly set NM to hand DNS off to systemd-resolved.
     # Without this, NM may try to use dnsmasq as its DNS plugin
     # (because dnsmasq is installed for hotspot use), which conflicts
     # with resolved and causes slow/broken DNS resolution at boot.
-    # dnsmasq is still available and NM still invokes it for hotspots â€”
+    # dnsmasq is still available and NM still invokes it for hotspots —
     # this only stops NM from using it as the global DNS backend.
     cat > /mnt/etc/NetworkManager/conf.d/10-dns-resolved.conf <<'NMEOF'
 [main]
@@ -1311,10 +1117,10 @@ dns=systemd-resolved
 systemd-resolved=false
 NMEOF
 
-    # â”€â”€ Ethernet link stability â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Ethernet link stability ──────────────────────────────
     # The ethernet NIC drops carrier during auto-negotiation with the switch
     # (speed/duplex handshake), which causes NM to cancel a DHCP transaction
-    # mid-flight and restart it â€” adding 20-30s before a lease is obtained.
+    # mid-flight and restart it — adding 20-30s before a lease is obtained.
     # ignore-carrier tells NM not to abort DHCP when the carrier briefly drops.
     # carrier-wait-timeout gives the link extra time to stabilise before NM
     # starts the DHCP transaction in the first place.
@@ -1325,8 +1131,8 @@ ignore-carrier=yes
 carrier-wait-timeout=2000
 ETHEOF
 
-    # â”€â”€ DNS-over-TLS (Cloudflare) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    # DNSOverTLS=opportunistic â€” uses TLS when available but falls back
+    # ── DNS-over-TLS (Cloudflare) ────────────────────────────
+    # DNSOverTLS=opportunistic — uses TLS when available but falls back
     # instantly rather than stalling boot waiting for a TLS handshake.
     # DNSOverTLS=yes (hard) adds several seconds of delay on every boot.
     mkdir -p /mnt/etc/systemd/resolved.conf.d
@@ -1340,11 +1146,11 @@ DNSEOF
 
     # (LAVD scheduler set up during first-boot with CachyOS kernel)
 
-    # â”€â”€ ntsync module â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── ntsync module ────────────────────────────────────────
     mkdir -p /mnt/etc/modules-load.d
     echo "ntsync" > /mnt/etc/modules-load.d/ntsync.conf
 
-    # â”€â”€ Auto-update timer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Auto-update timer ────────────────────────────────────
     cat > /mnt/etc/systemd/system/niixarch-update.service <<'UPDEOF'
 [Unit]
 Description=NiiX Arch System Update
@@ -1370,7 +1176,7 @@ RandomizedDelaySec=30min
 WantedBy=timers.target
 TMREOF
 
-    # â”€â”€ CoreCtrl polkit (AMD only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── CoreCtrl polkit (AMD only) ───────────────────────────
     if [[ "$GPU_VENDOR" == "amd" ]]; then
         mkdir -p /mnt/etc/polkit-1/rules.d
         cat > /mnt/etc/polkit-1/rules.d/90-corectrl.rules <<'POLEOF'
@@ -1383,7 +1189,7 @@ polkit.addRule(function(action, subject) {
 POLEOF
     fi
 
-    # â”€â”€ Configure + enable services in chroot â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Configure + enable services in chroot ────────────────
     log "Configuring system in chroot..."
     arch-chroot /mnt bash <<CHROOT
 set -e
@@ -1410,27 +1216,23 @@ sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
 # Enable services
 systemctl enable NetworkManager
 systemctl enable ananicy-cpp
+systemctl enable irqbalance
 systemctl enable ufw
+systemctl enable power-profiles-daemon
 systemctl enable systemd-resolved
 systemctl enable niixarch-update.timer
-# Hardware-specific services only on bare metal
-if [[ "${IS_VM}" == "false" ]]; then
-    systemctl enable irqbalance
-    systemctl enable power-profiles-daemon
-    systemctl enable iio-sensor-proxy
-fi
 
-# Disable NetworkManager-wait-online â€” it blocks boot until full network
+# Disable NetworkManager-wait-online — it blocks boot until full network
 # connectivity is confirmed, adding seconds of delay on every start.
 # GNOME handles network state itself; this service is not needed.
 systemctl disable NetworkManager-wait-online.service 2>/dev/null || true
 
-# Symlink resolv.conf for DNS-over-TLS (|| true â€” may already exist)
+# Symlink resolv.conf for DNS-over-TLS (|| true — may already exist)
 ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf || true
 
-# â”€â”€ Snapper â€” Btrfs snapshot management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Snapper — Btrfs snapshot management ──────────────────
 # snap-pac auto-creates pre/post snapshots on every pacman transaction.
-# Timeline disabled â€” only pacman snapshots, last 10 kept.
+# Timeline disabled — only pacman snapshots, last 10 kept.
 mkdir -p /etc/snapper/configs
 cat > /etc/snapper/configs/root <<'SNAPEOF'
 SUBVOLUME="/"
@@ -1451,7 +1253,7 @@ SNAPEOF
 chmod 750 /.snapshots
 systemctl enable snapper-cleanup.timer
 # Create the initial clean-install snapshot (pre-firstboot baseline)
-snapper --no-dbus -c root create --description "NiiX Arch â€” clean install" 2>/dev/null || true
+snapper --no-dbus -c root create --description "NiiX Arch — clean install" 2>/dev/null || true
 CHROOT
 
     log "LUKS UUID: $LUKS_UUID"
@@ -1466,10 +1268,10 @@ CHROOT
     log "System configured"
 }
 
-# â”€â”€ GNOME desktop + branding â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── GNOME desktop + branding ─────────────────────────────────
 install_desktop() {
     hr "GNOME + Branding"
-    log "Installing GNOME (minimal â€” no gnome-extra bloat)..."
+    log "Installing GNOME (minimal — no gnome-extra bloat)..."
     # gnome-extra is a huge group full of GNOME games, maps, weather, etc.
     # We install only what's actually needed for a clean desktop.
     arch-chroot /mnt pacman -S --noconfirm --needed \
@@ -1484,7 +1286,7 @@ install_desktop() {
 set -e
 systemctl enable gdm
 
-# GDM autologin â€” safe because LUKS2 already gates boot-time access
+# GDM autologin — safe because LUKS2 already gates boot-time access
 mkdir -p /etc/gdm
 cat > /etc/gdm/custom.conf <<GDMEOF
 [daemon]
@@ -1504,7 +1306,7 @@ EOF
 localectl set-x11-keymap "${KEYMAP_X11}"
 CHROOT
 
-    # â”€â”€ NiiX Arch branding â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── NiiX Arch branding ───────────────────────────────────
     log "Applying NiiX Arch branding..."
 
     # os-release
@@ -1514,7 +1316,7 @@ CHROOT
     # /etc/issue
     echo "NiiX Arch \r (\l)" > /mnt/etc/issue
 
-    # MOTD â€” kept plain text to avoid GDM/PAM rendering Unicode box art as
+    # MOTD — kept plain text to avoid GDM/PAM rendering Unicode box art as
     # garbage characters on the graphical login screen (pam_motd displays this).
     # The NiiX Arch ASCII logo is shown via fastfetch in the terminal instead.
     cat > /mnt/etc/motd <<'MOTDEOF'
@@ -1565,12 +1367,12 @@ NVEOF
     log "GNOME + branding installed"
 }
 
-# â”€â”€ Final initramfs build (MUST run after ALL packages) â”€â”€â”€â”€â”€â”€
+# ── Final initramfs build (MUST run after ALL packages) ──────
 rebuild_initramfs() {
     hr "Initramfs Rebuild"
     log "Writing final mkinitcpio.conf..."
 
-    # mkinitcpio hooks â€” busybox encrypt for stock kernel, systemd sd-encrypt for CachyOS
+    # mkinitcpio hooks — busybox encrypt for stock kernel, systemd sd-encrypt for CachyOS
     if [[ "$GPU_VENDOR" == "nvidia" ]]; then
         cat > /mnt/etc/mkinitcpio.conf <<'MKINIT'
 MODULES=(nvidia nvidia_modeset nvidia_uvm nvidia_drm)
@@ -1590,14 +1392,14 @@ MKINIT
     log "mkinitcpio.conf:"
     cat /mnt/etc/mkinitcpio.conf
 
-    log "Rebuilding initramfs (final â€” after all packages)..."
+    log "Rebuilding initramfs (final — after all packages)..."
     arch-chroot /mnt mkinitcpio -P
 
     # Verify
     if lsinitcpio /mnt/boot/initramfs-linux.img 2>/dev/null | grep -q "cryptsetup"; then
-        log "initramfs contains cryptsetup â€” LUKS prompt will work"
+        log "initramfs contains cryptsetup — LUKS prompt will work"
     else
-        warn "cryptsetup NOT found in initramfs â€” check log"
+        warn "cryptsetup NOT found in initramfs — check log"
         {
             echo "--- lsinitcpio initramfs-linux.img ---"
             lsinitcpio /mnt/boot/initramfs-linux.img 2>&1 || true
@@ -1605,41 +1407,33 @@ MKINIT
     fi
 }
 
-# â”€â”€ Limine bootloader â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Limine bootloader ────────────────────────────────────────
 install_limine() {
     hr "Limine Bootloader"
     log "Installing Limine bootloader..."
 
-    # â”€â”€ 1. Copy EFI binary â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── 1. Copy EFI binary ───────────────────────────────────
     mkdir -p /mnt/boot/EFI/limine /mnt/boot/EFI/BOOT
     cp /mnt/usr/share/limine/BOOTX64.EFI /mnt/boot/EFI/limine/BOOTX64.EFI
-    # Also install as the UEFI fallback path â€” many BIOSes boot this
+    # Also install as the UEFI fallback path — many BIOSes boot this
     # automatically when no NVRAM entry is found or has been cleared
     cp /mnt/usr/share/limine/BOOTX64.EFI /mnt/boot/EFI/BOOT/BOOTX64.EFI
     log "BOOTX64.EFI copied (\EFI\limine\ + fallback \EFI\BOOT\)"
 
-    # â”€â”€ 2. Build kernel cmdline â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── 2. Build kernel cmdline ──────────────────────────────
     local CMDLINE="cryptdevice=UUID=${LUKS_UUID}:${MAPPER} root=/dev/mapper/${MAPPER} rootflags=subvol=@ rootfstype=btrfs rw"
 
-    if [[ "$IS_VM" == false ]]; then
-        # Bare-metal: CPU power management + hardware-specific params
-        case "$CPU_VENDOR" in
-            amd)   CMDLINE+=" amd_pstate=active split_lock_detect=off" ;;
-            intel) CMDLINE+=" intel_pstate=active split_lock_detect=off" ;;
-        esac
-        [[ "$USE_MITIGATIONS" == false ]] && CMDLINE+=" mitigations=off"
-        CMDLINE+=" usbhid.mousepoll=1"
-        [[ "$GPU_VENDOR" == "amd" ]] && CMDLINE+=" amdgpu.ppfeaturemask=0xffffffff"
-        [[ "$GPU_VENDOR" == "nvidia" ]] && CMDLINE+=" nvidia-drm.modeset=1"
-    else
-        # VM: skip pstate (no real CPU freq control), keep mitigations ON
-        # (shared host â€” disabling mitigations in a VM is a security risk)
-        CMDLINE+=" console=tty0 console=ttyS0"   # serial console for debugging
-        warn "VM: mitigations kept ON, pstate params skipped"
-    fi
+    case "$CPU_VENDOR" in
+        amd)   CMDLINE+=" amd_pstate=active split_lock_detect=off" ;;
+        intel) CMDLINE+=" intel_pstate=active split_lock_detect=off" ;;
+    esac
+    [[ "$USE_MITIGATIONS" == false ]] && CMDLINE+=" mitigations=off"
+    CMDLINE+=" usbhid.mousepoll=1"
+    [[ "$GPU_VENDOR" == "amd" ]] && CMDLINE+=" amdgpu.ppfeaturemask=0xffffffff"
+    [[ "$GPU_VENDOR" == "nvidia" ]] && CMDLINE+=" nvidia-drm.modeset=1"
 
-    # â”€â”€ 3. Write Limine config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    # Limine 8+ uses volume-relative paths â€” no boot() macro.
+    # ── 3. Write Limine config ───────────────────────────────
+    # Limine 8+ uses volume-relative paths — no boot() macro.
     # /boot IS the EFI partition, so vmlinuz-linux is at the EFI root.
     mkdir -p /mnt/boot/limine /mnt/boot/EFI/limine
 
@@ -1686,7 +1480,7 @@ EOF
     cp /mnt/boot/EFI/limine/limine.cfg /mnt/boot/limine.cfg
     log "limine.cfg written to all search locations"
 
-    # â”€â”€ 4. Purge all stale NiiX Arch / Limine NVRAM entries â”€â”€
+    # ── 4. Purge all stale NiiX Arch / Limine NVRAM entries ──
     # Previous installs leave entries pointing to GPT GUIDs that no longer
     # exist. These shadow the new entry and break the boot order silently.
     info "Removing stale NiiX Arch / Limine NVRAM entries..."
@@ -1695,7 +1489,7 @@ EOF
     done < <(efibootmgr 2>/dev/null         | grep -iE "NiiX Arch|Limine"         | grep -oP 'Boot\K[0-9A-Fa-f]{4}')
     log "Stale NVRAM entries cleared"
 
-    # â”€â”€ 5. Register a single clean NVRAM entry â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── 5. Register a single clean NVRAM entry ───────────────
     local part_num
     part_num=$(echo "$EFI_PART_NUM" | tr -d '[:space:]')
     efibootmgr \
@@ -1706,7 +1500,7 @@ EOF
         --loader '\EFI\limine\BOOTX64.EFI' \
         --unicode \
         && log "Limine registered in UEFI NVRAM" \
-        || warn "efibootmgr failed â€” BIOS will use fallback \EFI\BOOT\BOOTX64.EFI"
+        || warn "efibootmgr failed — BIOS will use fallback \EFI\BOOT\BOOTX64.EFI"
 
     log "Limine registered in UEFI NVRAM"
 
@@ -1743,7 +1537,7 @@ HOOKEOF
     log "Pacman hooks created"
 }
 
-# â”€â”€ First-boot script (AUR, GNOME settings, flatpaks) â”€â”€â”€â”€â”€â”€â”€â”€
+# ── First-boot script (AUR, GNOME settings, flatpaks) ────────
 setup_firstboot() {
     hr "First-Boot Setup"
     log "Setting up first-boot script..."
@@ -1751,7 +1545,7 @@ setup_firstboot() {
     # Temporary passwordless sudo for first-boot only.
     # Scoped to the specific user; removed by the firstboot script itself on completion.
     cat > /mnt/etc/sudoers.d/niixarch-firstboot <<SUDOEOF
-# Temporary â€” grants ${USERNAME} passwordless sudo during first-boot setup.
+# Temporary — grants ${USERNAME} passwordless sudo during first-boot setup.
 # This file is automatically deleted when first-boot completes.
 ${USERNAME} ALL=(ALL) NOPASSWD: ALL
 SUDOEOF
@@ -1769,7 +1563,7 @@ CONFEOF
     # Write the first-boot script
     cat > /mnt/usr/local/bin/niixarch-firstboot.sh <<'FBEOF'
 # !/bin/bash
-# NiiX Arch First-Boot â€” CachyOS kernel, AUR packages, GNOME settings
+# NiiX Arch First-Boot — CachyOS kernel, AUR packages, GNOME settings
 # Run via autostart, or manually: bash /usr/local/bin/niixarch-firstboot.sh
 set +e
 
@@ -1779,19 +1573,19 @@ GREEN='\033[38;5;118m'
 PINK='\033[38;5;205m'
 RED='\033[0;31m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; WHITE='\033[1;37m'; BOLD='\033[1m'; NC='\033[0m'
-log()  { echo -e "  ${GREEN}âœ“${NC}  $*"; }
-warn() { echo -e "  ${YELLOW}âš ${NC}  $*"; }
-info() { echo -e "  ${CYAN}Â·${NC}  $*"; }
+log()  { echo -e "  ${GREEN}✓${NC}  $*"; }
+warn() { echo -e "  ${YELLOW}⚠${NC}  $*"; }
+info() { echo -e "  ${CYAN}·${NC}  $*"; }
 
 LOG="$HOME/niixarch-firstboot-$(date +%Y%m%d-%H%M%S).log"
 exec > >(tee -a "$LOG") 2>&1
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# PHASE 1 â€” Offline setup (no internet required)
+# ════════════════════════════════════════════════════════
+# PHASE 1 — Offline setup (no internet required)
 # Runs immediately so the desktop looks right straight away.
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ════════════════════════════════════════════════════════
 
-# â”€â”€ GNOME settings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── GNOME settings ───────────────────────────────────────
 info "Applying GNOME settings..."
 gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark' 2>/dev/null || true
 gsettings set org.gnome.desktop.interface gtk-theme 'Adwaita-dark' 2>/dev/null || true
@@ -1805,16 +1599,6 @@ gsettings set org.gnome.mutter dynamic-workspaces false 2>/dev/null || true
 gsettings set org.gnome.desktop.wm.preferences num-workspaces 1 2>/dev/null || true
 gsettings set org.gnome.desktop.notifications show-in-lock-screen false 2>/dev/null || true
 
-# â”€â”€ Tablet mode / auto-rotate / on-screen keyboard â”€â”€â”€â”€â”€â”€â”€
-# iio-sensor-proxy feeds the accelerometer data to GNOME.
-# When the hinge sensor reports tablet mode, GNOME Shell:
-#   - auto-rotates the display to match physical orientation
-#   - shows the OSK automatically when a text field is focused
-#   - hides the top-bar overview button and disables the touchpad
-# These settings activate that behaviour without any user action.
-gsettings set org.gnome.settings-daemon.peripherals.touchscreen orientation-lock false 2>/dev/null || true
-gsettings set org.gnome.desktop.a11y.applications screen-keyboard-enabled true 2>/dev/null || true
-
 # Ctrl+Alt+T terminal shortcut
 gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/']" 2>/dev/null || true
 gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ name "Terminal" 2>/dev/null || true
@@ -1826,10 +1610,10 @@ gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com 2>/dev/null || tr
 gsettings set org.gnome.shell favorite-apps "['org.gnome.Nautilus.desktop', 'org.gnome.Terminal.desktop', 'steam.desktop', 'com.heroicgameslauncher.hgl.desktop']" 2>/dev/null || true
 log "GNOME settings applied"
 
-# â”€â”€ Performance profile â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Performance profile ───────────────────────────────────
 sudo powerprofilesctl set performance 2>/dev/null || true
 
-# â”€â”€ Gamemode config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Gamemode config ───────────────────────────────────────
 mkdir -p "$HOME/.config"
 cat > "$HOME/.config/gamemode.ini" <<'GMEOF'
 [general]
@@ -1849,7 +1633,7 @@ start = notify-send "GameMode" "Gaming optimizations ON"
 end = notify-send "GameMode" "Gaming optimizations OFF"
 GMEOF
 
-# â”€â”€ Bluetooth A2DP fix â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Bluetooth A2DP fix ────────────────────────────────────
 mkdir -p "$HOME/.config/wireplumber/wireplumber.conf.d"
 cat > "$HOME/.config/wireplumber/wireplumber.conf.d/51-bluetooth-fix.conf" <<'BTEOF'
 monitor.bluez.properties = {
@@ -1859,10 +1643,10 @@ monitor.bluez.properties = {
 }
 BTEOF
 
-# â”€â”€ fastfetch on terminal open â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── fastfetch on terminal open ────────────────────────────
 echo 'fastfetch' >> "$HOME/.bashrc"
 
-# â”€â”€ fastfetch config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── fastfetch config ──────────────────────────────────────
 mkdir -p "$HOME/.config/fastfetch"
 cat > "$HOME/.config/fastfetch/config.jsonc" <<'FFEOF'
 {
@@ -1872,7 +1656,7 @@ cat > "$HOME/.config/fastfetch/config.jsonc" <<'FFEOF'
     "source": "arch",
     "color": { "1": "38;5;118", "2": "38;5;205" }
   },
-  "display": { "separator": " â†’ ", "color": { "keys": "38;5;118", "title": "38;5;205" } },
+  "display": { "separator": " → ", "color": { "keys": "38;5;118", "title": "38;5;205" } },
   "modules": [
     { "type": "title", "format": "{user-name}@niixarch" }, "separator",
     { "type": "os", "key": "OS", "format": "NiiX Arch" },
@@ -1887,24 +1671,24 @@ cat > "$HOME/.config/fastfetch/config.jsonc" <<'FFEOF'
 FFEOF
 log "Offline config done"
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# PHASE 2 â€” Banner + network wait
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ════════════════════════════════════════════════════════
+# PHASE 2 — Banner + network wait
+# ════════════════════════════════════════════════════════
 
 echo
-echo -e "${GREEN}  â–ˆâ–ˆâ–ˆâ•—   â–ˆâ–ˆâ•—â–ˆâ–ˆâ•—â–ˆâ–ˆâ•—â–ˆâ–ˆâ•—  â–ˆâ–ˆâ•— â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•— ${PINK}â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•—  â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•—â–ˆâ–ˆâ•—  â–ˆâ–ˆâ•—${NC}"
-echo -e "${GREEN}  â–ˆâ–ˆâ–ˆâ–ˆâ•—  â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â•šâ–ˆâ–ˆâ•—â–ˆâ–ˆâ•”â•â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•—${PINK}â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•—â–ˆâ–ˆâ•”â•â•â•â•â•â–ˆâ–ˆâ•‘  â–ˆâ–ˆâ•‘${NC}"
-echo -e "${GREEN}  â–ˆâ–ˆâ•”â–ˆâ–ˆâ•— â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘ â•šâ–ˆâ–ˆâ–ˆâ•”â• â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•‘${PINK}â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•”â•â–ˆâ–ˆâ•‘     â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•‘${NC}"
-echo -e "${GREEN}  â–ˆâ–ˆâ•‘â•šâ–ˆâ–ˆâ•—â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘ â–ˆâ–ˆâ•”â–ˆâ–ˆâ•— â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•‘${PINK}â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•—â–ˆâ–ˆâ•‘     â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•‘${NC}"
-echo -e "${GREEN}  â–ˆâ–ˆâ•‘ â•šâ–ˆâ–ˆâ–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•”â• â–ˆâ–ˆâ•—â–ˆâ–ˆâ•‘  â–ˆâ–ˆâ•‘${PINK}â–ˆâ–ˆâ•‘  â–ˆâ–ˆâ•‘â•šâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•—â–ˆâ–ˆâ•‘  â–ˆâ–ˆâ•‘${NC}"
-echo -e "${GREEN}  â•šâ•â•  â•šâ•â•â•â•â•šâ•â•â•šâ•â•â•šâ•â•  â•šâ•â•â•šâ•â•  â•šâ•â•${PINK}â•šâ•â•  â•šâ•â• â•šâ•â•â•â•â•â•â•šâ•â•  â•šâ•â•${NC}"
+echo -e "${GREEN}  ███╗   ██╗██╗██╗██╗  ██╗ █████╗ ${PINK}██████╗  ██████╗██╗  ██╗${NC}"
+echo -e "${GREEN}  ████╗  ██║██║██║╚██╗██╔╝██╔══██╗${PINK}██╔══██╗██╔════╝██║  ██║${NC}"
+echo -e "${GREEN}  ██╔██╗ ██║██║██║ ╚███╔╝ ███████║${PINK}██████╔╝██║     ███████║${NC}"
+echo -e "${GREEN}  ██║╚██╗██║██║██║ ██╔██╗ ██╔══██║${PINK}██╔══██╗██║     ██╔══██║${NC}"
+echo -e "${GREEN}  ██║ ╚████║██║██║██╔╝ ██╗██║  ██║${PINK}██║  ██║╚██████╗██║  ██║${NC}"
+echo -e "${GREEN}  ╚═╝  ╚═══╝╚═╝╚═╝╚═╝  ╚═╝╚═╝  ╚═╝${PINK}╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝${NC}"
 echo
 echo -e "  ${WHITE}${BOLD}First-Boot Setup${NC}"
-echo -e "  ${PINK}â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€${NC}"
-echo -e "  ${CYAN}Â·${NC}  CachyOS kernel Â· AUR packages Â· GE-Proton Â· wallpaper"
+echo -e "  ${PINK}────────────────────────────────────────────────${NC}"
+echo -e "  ${CYAN}·${NC}  CachyOS kernel · AUR packages · GE-Proton · wallpaper"
 echo
 
-# â”€â”€ Wait for network â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Wait for network ──────────────────────────────────────
 info "Checking network connectivity..."
 
 _nm_connected() {
@@ -1914,28 +1698,28 @@ _nm_connected() {
 if _nm_connected; then
     log "Network ready"
 else
-    info "Waiting for network connectivity (no timeout â€” will wait as long as needed)..."
+    info "Waiting for network connectivity (no timeout — will wait as long as needed)..."
     local attempt=0
     until _nm_connected; do
         attempt=$(( attempt + 1 ))
-        echo -ne "\r  Â·  Waiting for network... (attempt $attempt)"
+        echo -ne "\r  ·  Waiting for network... (attempt $attempt)"
         sleep 3
     done
     echo ""
     log "Network ready"
 fi
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# PHASE 3 â€” Internet-dependent setup
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ════════════════════════════════════════════════════════
+# PHASE 3 — Internet-dependent setup
+# ════════════════════════════════════════════════════════
 
-# â”€â”€ Wallpaper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Wallpaper ─────────────────────────────────────────────
 info "Downloading NiiX Arch wallpaper..."
 mkdir -p "$HOME/Pictures"
 curl -L --retry 5 -o "$HOME/Pictures/niix-background.png" \
     "https://arch.niiix.net/niix-background.png" 2>/dev/null \
     && log "Wallpaper downloaded" \
-    || warn "Could not download wallpaper â€” set manually later"
+    || warn "Could not download wallpaper — set manually later"
 
 if [ -f "$HOME/Pictures/niix-background.png" ]; then
     gsettings set org.gnome.desktop.background picture-uri \
@@ -1946,7 +1730,7 @@ if [ -f "$HOME/Pictures/niix-background.png" ]; then
     log "Wallpaper set"
 fi
 
-# â”€â”€ CachyOS kernel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── CachyOS kernel ────────────────────────────────────────
 if ! pacman -Q linux-cachyos &>/dev/null; then
     info "Setting up CachyOS repository..."
     cd /tmp
@@ -1982,7 +1766,7 @@ else
     log "CachyOS kernel already installed"
 fi
 
-# â”€â”€ LAVD scheduler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── LAVD scheduler ────────────────────────────────────────
 if ! pacman -Q scx-scheds &>/dev/null; then
     info "Installing LAVD scheduler..."
     sudo pacman -S --noconfirm --needed scx-scheds
@@ -1994,7 +1778,7 @@ if ! pacman -Q scx-scheds &>/dev/null; then
     fi
 fi
 
-# â”€â”€ Update Limine for CachyOS + @clean â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Update Limine for CachyOS + @clean ───────────────────
 if [ -f /boot/vmlinuz-linux-cachyos ]; then
     info "Updating Limine config..."
     LIMINE_CONF=""
@@ -2044,21 +1828,21 @@ LIMEOF
         sudo cp "$TMPFILE" /boot/limine/limine.conf 2>/dev/null || true
         sudo cp "$TMPFILE" /boot/limine.cfg 2>/dev/null || true
         rm "$TMPFILE"
-        log "Limine updated â€” CachyOS kernel Â· @clean fallback added"
+        log "Limine updated — CachyOS kernel · @clean fallback added"
     else
-        warn "Could not find limine config â€” update Limine manually"
+        warn "Could not find limine config — update Limine manually"
     fi
 else
     warn "CachyOS kernel not found at /boot/vmlinuz-linux-cachyos"
 fi
 
-# â”€â”€ Remove stock linux kernel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Remove stock linux kernel ─────────────────────────────
 info "Removing stock linux kernel..."
 sudo pacman -Rns --noconfirm linux linux-headers 2>/dev/null \
-    && log "Stock kernel removed â€” CachyOS only" \
-    || warn "Could not remove stock kernel â€” run: sudo pacman -Rns linux linux-headers"
+    && log "Stock kernel removed — CachyOS only" \
+    || warn "Could not remove stock kernel — run: sudo pacman -Rns linux linux-headers"
 
-# â”€â”€ Create @clean bootable fallback subvolume â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Create @clean bootable fallback subvolume ─────────────
 info "Creating @clean Btrfs fallback snapshot..."
 MAPPER_DEV=$(findmnt -n -o SOURCE / | head -1)
 TMP_MNT=$(mktemp -d)
@@ -2067,13 +1851,13 @@ if mount -o subvol=/ "$MAPPER_DEV" "$TMP_MNT" 2>/dev/null; then
         && btrfs subvolume delete "$TMP_MNT/@clean" 2>/dev/null
     btrfs subvolume snapshot "$TMP_MNT/@" "$TMP_MNT/@clean"
     umount "$TMP_MNT"
-    log "@clean snapshot created â€” boot it from Limine as 'NiiX Arch (clean state)'"
+    log "@clean snapshot created — boot it from Limine as 'NiiX Arch (clean state)'"
 else
-    warn "Could not mount Btrfs top-level â€” @clean skipped, run: sudo niixarch-refresh-clean"
+    warn "Could not mount Btrfs top-level — @clean skipped, run: sudo niixarch-refresh-clean"
 fi
 rmdir "$TMP_MNT" 2>/dev/null || true
 
-# â”€â”€ niixarch-refresh-clean helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── niixarch-refresh-clean helper ────────────────────────
 sudo tee /usr/local/bin/niixarch-refresh-clean > /dev/null <<'REFRESHEOF'
 # !/bin/bash
 echo "Refreshing @clean snapshot to current system state..."
@@ -2085,11 +1869,11 @@ btrfs subvolume show "$TMP_MNT/@clean" &>/dev/null \
 btrfs subvolume snapshot "$TMP_MNT/@" "$TMP_MNT/@clean"
 umount "$TMP_MNT"
 rmdir "$TMP_MNT"
-echo "Done â€” 'NiiX Arch (clean state)' in Limine now reflects current system."
+echo "Done — 'NiiX Arch (clean state)' in Limine now reflects current system."
 REFRESHEOF
 sudo chmod +x /usr/local/bin/niixarch-refresh-clean
 
-# â”€â”€ yay â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── yay ───────────────────────────────────────────────────
 if ! command -v yay &>/dev/null; then
     info "Installing yay (AUR helper)..."
     cd /tmp && rm -rf yay
@@ -2110,7 +1894,7 @@ aur_install() {
     return 1
 }
 
-# â”€â”€ AUR packages â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── AUR packages ──────────────────────────────────────────
 info "Installing AUR packages..."
 aur_install dxvk-mingw || true
 aur_install ananicy-rules-git || true
@@ -2120,14 +1904,14 @@ aur_install helium-browser-bin || true
 [[ "$GPU_VENDOR" == "nvidia" ]] && aur_install gwe || true
 log "AUR packages done"
 
-# â”€â”€ Flatpak â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Flatpak ───────────────────────────────────────────────
 info "Installing Flatpak apps..."
 flatpak remote-add --if-not-exists flathub \
     https://dl.flathub.org/repo/flathub.flatpakrepo
 flatpak install -y flathub com.stremio.Stremio || true
 log "Flatpak apps installed"
 
-# â”€â”€ GE-Proton â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── GE-Proton ─────────────────────────────────────────────
 info "Installing latest GE-Proton..."
 GEPROTON_TAG=$(curl -s "https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases/latest" | grep tag_name | cut -d\" -f4)
 if [ -n "$GEPROTON_TAG" ]; then
@@ -2141,25 +1925,25 @@ if [ -n "$GEPROTON_TAG" ]; then
         log "GE-Proton $GEPROTON_TAG installed"
     fi
 else
-    warn "Could not fetch GE-Proton â€” install via ProtonUp-Qt later"
+    warn "Could not fetch GE-Proton — install via ProtonUp-Qt later"
 fi
 
-# â”€â”€ Cleanup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Cleanup ───────────────────────────────────────────────
 sudo rm -f /etc/xdg/autostart/niixarch-firstboot.desktop
 sudo rm -f /etc/sudoers.d/niixarch-firstboot   # remove temporary passwordless sudo
 sudo touch /var/lib/niixarch-firstboot-done
 
 echo ""
-echo -e "  ${GREEN}âœ“${NC}  ${WHITE}${BOLD}First-boot setup complete!${NC}"
-echo -e "  ${PINK}â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€${NC}"
-echo -e "  ${CYAN}Â·${NC}  Steam launch options: ${GREEN}gamemoderun mangohud %command%${NC}"
-echo -e "  ${CYAN}Â·${NC}  Refresh clean snapshot: ${GREEN}sudo niixarch-refresh-clean${NC}"
-echo -e "  ${CYAN}Â·${NC}  Log saved to: $LOG"
+echo -e "  ${GREEN}✓${NC}  ${WHITE}${BOLD}First-boot setup complete!${NC}"
+echo -e "  ${PINK}────────────────────────────────────────────────${NC}"
+echo -e "  ${CYAN}·${NC}  Steam launch options: ${GREEN}gamemoderun mangohud %command%${NC}"
+echo -e "  ${CYAN}·${NC}  Refresh clean snapshot: ${GREEN}sudo niixarch-refresh-clean${NC}"
+echo -e "  ${CYAN}·${NC}  Log saved to: $LOG"
 echo ""
 warn "Rebooting in 10 seconds to load the CachyOS kernel..."
 info "Press Ctrl+C to cancel."
 for i in 10 9 8 7 6 5 4 3 2 1; do
-    echo -ne "\r  Â·  Rebooting in ${i}s... "
+    echo -ne "\r  ·  Rebooting in ${i}s... "
     sleep 1
 done
 echo ""
@@ -2168,7 +1952,7 @@ FBEOF
 
     chmod +x /mnt/usr/local/bin/niixarch-firstboot.sh
 
-    # â”€â”€ Launcher wrapper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Launcher wrapper ──────────────────────────────────
     # A separate script handles terminal detection and the done-file guard.
     # This avoids shell quoting issues inside the .desktop Exec field.
     cat > /mnt/usr/local/bin/niixarch-firstboot-launcher.sh <<'LAUNCHEOF'
@@ -2190,11 +1974,11 @@ fi
 LAUNCHEOF
     chmod +x /mnt/usr/local/bin/niixarch-firstboot-launcher.sh
 
-    # â”€â”€ Autostart .desktop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    # Exec points directly to the launcher â€” no shell quoting needed.
+    # ── Autostart .desktop ────────────────────────────────
+    # Exec points directly to the launcher — no shell quoting needed.
     # NoDisplay=false  : ensures GNOME's autostart actually processes it.
     # Terminal=false   : launcher opens its own terminal; don't wrap in another.
-    # OnlyShowIn left out intentionally â€” the restriction can silently block
+    # OnlyShowIn left out intentionally — the restriction can silently block
     # the entry if XDG_CURRENT_DESKTOP doesn't match the exact string.
     mkdir -p /mnt/etc/xdg/autostart
     cat > /mnt/etc/xdg/autostart/niixarch-firstboot.desktop <<'DTEOF'
@@ -2210,21 +1994,21 @@ DTEOF
     log "First-boot script installed (runs automatically on first login)"
 }
 
-# â”€â”€ Step 12: Done â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Step 12: Done ────────────────────────────────────────────
 finish() {
     hr "Complete"
     echo
-    echo -e "${GREEN}  â–ˆâ–ˆâ–ˆâ•—   â–ˆâ–ˆâ•—â–ˆâ–ˆâ•—â–ˆâ–ˆâ•—â–ˆâ–ˆâ•—  â–ˆâ–ˆâ•— â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•— ${PINK}â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•—  â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•—â–ˆâ–ˆâ•—  â–ˆâ–ˆâ•—${NC}"
-    echo -e "${GREEN}  â–ˆâ–ˆâ–ˆâ–ˆâ•—  â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â•šâ–ˆâ–ˆâ•—â–ˆâ–ˆâ•”â•â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•—${PINK}â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•—â–ˆâ–ˆâ•”â•â•â•â•â•â–ˆâ–ˆâ•‘  â–ˆâ–ˆâ•‘${NC}"
-    echo -e "${GREEN}  â–ˆâ–ˆâ•”â–ˆâ–ˆâ•— â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘ â•šâ–ˆâ–ˆâ–ˆâ•”â• â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•‘${PINK}â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•”â•â–ˆâ–ˆâ•‘     â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•‘${NC}"
-    echo -e "${GREEN}  â–ˆâ–ˆâ•‘â•šâ–ˆâ–ˆâ•—â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘ â–ˆâ–ˆâ•”â–ˆâ–ˆâ•— â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•‘${PINK}â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•—â–ˆâ–ˆâ•‘     â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•‘${NC}"
-    echo -e "${GREEN}  â–ˆâ–ˆâ•‘ â•šâ–ˆâ–ˆâ–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•”â• â–ˆâ–ˆâ•—â–ˆâ–ˆâ•‘  â–ˆâ–ˆâ•‘${PINK}â–ˆâ–ˆâ•‘  â–ˆâ–ˆâ•‘â•šâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•—â–ˆâ–ˆâ•‘  â–ˆâ–ˆâ•‘${NC}"
-    echo -e "${GREEN}  â•šâ•â•  â•šâ•â•â•â•â•šâ•â•â•šâ•â•â•šâ•â•  â•šâ•â•â•šâ•â•  â•šâ•â•${PINK}â•šâ•â•  â•šâ•â• â•šâ•â•â•â•â•â•â•šâ•â•  â•šâ•â•${NC}"
+    echo -e "${GREEN}  ███╗   ██╗██╗██╗██╗  ██╗ █████╗ ${PINK}██████╗  ██████╗██╗  ██╗${NC}"
+    echo -e "${GREEN}  ████╗  ██║██║██║╚██╗██╔╝██╔══██╗${PINK}██╔══██╗██╔════╝██║  ██║${NC}"
+    echo -e "${GREEN}  ██╔██╗ ██║██║██║ ╚███╔╝ ███████║${PINK}██████╔╝██║     ███████║${NC}"
+    echo -e "${GREEN}  ██║╚██╗██║██║██║ ██╔██╗ ██╔══██║${PINK}██╔══██╗██║     ██╔══██║${NC}"
+    echo -e "${GREEN}  ██║ ╚████║██║██║██╔╝ ██╗██║  ██║${PINK}██║  ██║╚██████╗██║  ██║${NC}"
+    echo -e "${GREEN}  ╚═╝  ╚═══╝╚═╝╚═╝╚═╝  ╚═╝╚═╝  ╚═╝${PINK}╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝${NC}"
     echo
     echo -e "  ${GREEN}installation complete!${NC}"
-    echo -e "  ${PINK}â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€${NC}"
+    echo -e "  ${PINK}────────────────────────────────────────────────────────${NC}"
     echo
-    echo -e "  ${PINK}â–¸${NC}  Run these commands to unmount and reboot:"
+    echo -e "  ${PINK}▸${NC}  Run these commands to unmount and reboot:"
     echo
     echo -e "      ${YELLOW}umount -R /mnt${NC}"
     echo -e "      ${YELLOW}cryptsetup close $MAPPER${NC}"
@@ -2232,22 +2016,22 @@ finish() {
     echo
     echo -e "  ${DIM}Remove the USB when the screen goes blank.${NC}"
     echo
-    echo -e "  ${PINK}â”€â”€ At the Limine menu â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€${NC}"
+    echo -e "  ${PINK}── At the Limine menu ────────────────────────────${NC}"
     echo
-    echo -e "  ${GREEN}âœ“${NC}  ${WHITE}NiiX Arch${NC}              â†’ LUKS passphrase â†’ GDM login"
-    echo -e "  ${GREEN}âœ“${NC}  ${WHITE}NiiX Arch (clean state)${NC} â†’ boots @clean fallback (after first-boot)"
+    echo -e "  ${GREEN}✓${NC}  ${WHITE}NiiX Arch${NC}              → LUKS passphrase → GDM login"
+    echo -e "  ${GREEN}✓${NC}  ${WHITE}NiiX Arch (clean state)${NC} → boots @clean fallback (after first-boot)"
     if [[ "$INSTALL_MODE" == "dualboot" ]]; then
-        echo -e "  ${GREEN}âœ“${NC}  ${WHITE}Windows Boot Manager${NC}   â†’ boots Windows normally"
+        echo -e "  ${GREEN}✓${NC}  ${WHITE}Windows Boot Manager${NC}   → boots Windows normally"
     fi
     echo
-    echo -e "  ${PINK}â”€â”€ On first login â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€${NC}"
+    echo -e "  ${PINK}── On first login ────────────────────────────────${NC}"
     echo
-    echo -e "  ${CYAN}Â·${NC}  A terminal opens automatically and runs the first-boot setup."
-    echo -e "  ${CYAN}Â·${NC}  It installs: CachyOS kernel Â· removes stock linux Â· AUR packages Â· GE-Proton"
-    echo -e "  ${CYAN}Â·${NC}  Creates the ${WHITE}@clean${NC} Btrfs snapshot â€” bootable from Limine as a fallback."
-    echo -e "  ${CYAN}Â·${NC}  This takes 10â€“20 minutes. Let it complete, then reboot."
-    echo -e "  ${CYAN}Â·${NC}  Snapper auto-snapshots before/after every pacman update (snap-pac)."
-    echo -e "  ${CYAN}Â·${NC}  Refresh the clean state any time: ${WHITE}sudo niixarch-refresh-clean${NC}"
+    echo -e "  ${CYAN}·${NC}  A terminal opens automatically and runs the first-boot setup."
+    echo -e "  ${CYAN}·${NC}  It installs: CachyOS kernel · removes stock linux · AUR packages · GE-Proton"
+    echo -e "  ${CYAN}·${NC}  Creates the ${WHITE}@clean${NC} Btrfs snapshot — bootable from Limine as a fallback."
+    echo -e "  ${CYAN}·${NC}  This takes 10–20 minutes. Let it complete, then reboot."
+    echo -e "  ${CYAN}·${NC}  Snapper auto-snapshots before/after every pacman update (snap-pac)."
+    echo -e "  ${CYAN}·${NC}  Refresh the clean state any time: ${WHITE}sudo niixarch-refresh-clean${NC}"
     echo
     if [[ "$INSTALL_MODE" == "dualboot" ]]; then
         warn "If Limine doesn't appear: go into BIOS and move"
@@ -2256,10 +2040,10 @@ finish() {
     echo
 }
 
-# â”€â”€ Auto-detect install mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Auto-detect install mode ─────────────────────────────────
 # Scans internal drives for Windows (NTFS partitions or EFI/Microsoft).
-# Windows found  â†’ dual-boot (automatically, no menu)
-# Nothing found  â†’ single-boot (automatically, no menu)
+# Windows found  → dual-boot (automatically, no menu)
+# Nothing found  → single-boot (automatically, no menu)
 auto_detect_mode() {
     hr "Install Mode Detection"
     info "Scanning internal drives for existing operating systems..."
@@ -2306,18 +2090,18 @@ auto_detect_mode() {
     echo
     if [[ "$windows_found" == true ]]; then
         INSTALL_MODE="dualboot"
-        echo -e "  ${GREEN}âœ“${NC}  ${WHITE}${BOLD}Windows detected â€” installing in dual-boot mode${NC}"
+        echo -e "  ${GREEN}✓${NC}  ${WHITE}${BOLD}Windows detected — installing in dual-boot mode${NC}"
         echo -e "  ${DIM}  Arch will be installed alongside Windows. No existing data will be touched.${NC}"
     else
         INSTALL_MODE="singleboot"
-        echo -e "  ${CYAN}Â·${NC}  ${WHITE}${BOLD}No existing OS detected â€” installing in single-boot mode${NC}"
+        echo -e "  ${CYAN}·${NC}  ${WHITE}${BOLD}No existing OS detected — installing in single-boot mode${NC}"
         echo -e "  ${DIM}  A drive of your choice will be fully wiped and used for Arch.${NC}"
     fi
     echo
 }
 
-# â”€â”€ Single-boot: select target drive â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# â”€â”€ Single-boot step 1: choose the target drive â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Single-boot: select target drive ────────────────────────
+# ── Single-boot step 1: choose the target drive ─────────────
 select_single_drive() {
     hr "Select Target Drive  (will be fully wiped)"
     warn "The ENTIRE selected drive will be repartitioned and ALL data destroyed."
@@ -2379,12 +2163,12 @@ select_single_drive() {
     log "Target drive confirmed: $SINGLE_DRIVE ($drive_size)"
 }
 
-# â”€â”€ Single-boot step 2: wipe the drive â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Single-boot step 2: wipe the drive ───────────────────────
 # Completely destroys all existing data, partition tables, and
 # filesystem signatures. Run BEFORE partitioning.
 wipe_single_drive() {
     hr "Drive Wipe"
-    info "Wiping $SINGLE_DRIVE â€” destroying all existing data..."
+    info "Wiping $SINGLE_DRIVE — destroying all existing data..."
 
     # Close any open LUKS containers on this drive first
     lsblk -lno NAME,TYPE "$SINGLE_DRIVE" 2>/dev/null \
@@ -2415,36 +2199,36 @@ wipe_single_drive() {
 
     partprobe "$SINGLE_DRIVE" 2>/dev/null || true
     sleep 1
-    log "Drive $SINGLE_DRIVE wiped â€” ready for partitioning"
+    log "Drive $SINGLE_DRIVE wiped — ready for partitioning"
 }
 
-# â”€â”€ Single-boot step 3: partition the drive â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Single-boot step 3: partition the drive ───────────────────
 # Creates the same GPT layout dual-boot uses (EFI + LUKS),
 # then sets the identical variables so all downstream functions
 # (setup_luks, setup_btrfs, clean_efi, install_limine) run unchanged.
 create_singleboot_partitions() {
     hr "Partition Creation  (single-boot)"
-    info "Partitioning $SINGLE_DRIVE â€” same layout as dual-boot..."
+    info "Partitioning $SINGLE_DRIVE — same layout as dual-boot..."
 
-    # â”€â”€ GPT + EFI + LUKS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── GPT + EFI + LUKS ─────────────────────────────────────
     parted -s "$SINGLE_DRIVE" mklabel gpt
     log "New GPT partition table created"
 
-    # Partition 1: EFI System Partition â€” 512 MiB
+    # Partition 1: EFI System Partition — 512 MiB
     # 1 MiB aligned start; large enough for kernel + initramfs + ucode + Limine
     parted -s "$SINGLE_DRIVE" mkpart "EFI" fat32 1MiB 513MiB
     parted -s "$SINGLE_DRIVE" set 1 esp on
-    log "EFI partition: 1 MiB â†’ 513 MiB  (512 MiB, partition 1)"
+    log "EFI partition: 1 MiB → 513 MiB  (512 MiB, partition 1)"
 
-    # Partition 2: Linux LUKS container â€” remainder of drive
+    # Partition 2: Linux LUKS container — remainder of drive
     parted -s "$SINGLE_DRIVE" mkpart "arch" 513MiB 100%
-    log "Root partition: 513 MiB â†’ 100%  (partition 2)"
+    log "Root partition: 513 MiB → 100%  (partition 2)"
 
     # Inform the kernel and give udev time to create device nodes
     partprobe "$SINGLE_DRIVE"
     sleep 3
 
-    # Build partition paths â€” NVMe/MMC use 'p' suffix, SATA/USB do not
+    # Build partition paths — NVMe/MMC use 'p' suffix, SATA/USB do not
     if [[ "$SINGLE_DRIVE" == *nvme* || "$SINGLE_DRIVE" == *mmcblk* ]]; then
         EFI_PART="${SINGLE_DRIVE}p1"
         LUKS_PART="${SINGLE_DRIVE}p2"
@@ -2457,7 +2241,7 @@ create_singleboot_partitions() {
     [[ -b "$EFI_PART"  ]] || err "EFI partition $EFI_PART not found after partprobe"
     [[ -b "$LUKS_PART" ]] || err "Root partition $LUKS_PART not found after partprobe"
 
-    # Mirror the variables dual-boot sets â€” everything downstream is identical
+    # Mirror the variables dual-boot sets — everything downstream is identical
     EFI_DRIVE="$SINGLE_DRIVE"
     EFI_PART_NUM=1
     TARGET_DRIVE="$SINGLE_DRIVE"
@@ -2468,9 +2252,9 @@ create_singleboot_partitions() {
     log "LUKS partition ready:    $LUKS_PART  (encryption next)"
 }
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ════════════════════════════════════════════════════════════
 #  MAIN
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ════════════════════════════════════════════════════════════
 dbg "Script started: $(date)"
 dbg "Script source: $0"
 dbg "Kernel: $(uname -r)"
@@ -2479,7 +2263,7 @@ banner
 check_prereqs
 auto_detect_mode
 
-# â”€â”€ Hardware + drive detection (mode-dependent) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Hardware + drive detection (mode-dependent) ──────────────
 if [[ "$INSTALL_MODE" == "dualboot" ]]; then
     detect_efi
 fi
@@ -2493,31 +2277,31 @@ else
     select_single_drive   # step 1: choose drive + confirm WIPE
 fi
 
-# â”€â”€ User input + confirmation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── User input + confirmation ────────────────────────────────
 gather_input
 confirm
 
-# â”€â”€ Disk setup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Disk setup ───────────────────────────────────────────────
 if [[ "$INSTALL_MODE" == "dualboot" ]]; then
     # Dual-boot: carve a partition out of existing free space
     create_partition
     dump_state "after create_partition"
 else
-    # Single-boot: wipe â†’ partition â†’ same layout as dual-boot
+    # Single-boot: wipe → partition → same layout as dual-boot
     wipe_single_drive                        # step 2: destroy everything
     dump_state "after wipe"
     create_singleboot_partitions             # step 3: GPT + EFI + LUKS
     dump_state "after singleboot_partitions"
 fi
 
-# â”€â”€ From here both modes are identical â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── From here both modes are identical ───────────────────────
 setup_luks
 dump_state "after setup_luks"
 setup_btrfs
 clean_efi       # purges stale NVRAM entries + old Arch/Limine files
 dump_state "after btrfs + clean_efi"
 
-# â”€â”€ Install + configure (same for both modes) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Install + configure (same for both modes) ────────────────
 install_base
 install_gpu_drivers
 install_packages
@@ -2526,7 +2310,7 @@ configure_system
 # Dump boot-critical files to log
 {
     echo ""
-    echo "â•â•â•â• BOOT CONFIG DUMP â•â•â•â•"
+    echo "════ BOOT CONFIG DUMP ════"
     echo ""
     echo "--- /mnt/etc/mkinitcpio.conf ---"
     cat /mnt/etc/mkinitcpio.conf 2>&1 || true
@@ -2549,7 +2333,7 @@ configure_system
     echo "--- EFI partition space ---"
     df -h /mnt/boot 2>&1 || true
     echo ""
-    echo "â•â•â•â• END BOOT CONFIG DUMP â•â•â•â•"
+    echo "════ END BOOT CONFIG DUMP ════"
 } >> "$LOGFILE" 2>&1
 
 install_desktop
@@ -2560,7 +2344,7 @@ setup_firstboot
 # Dump final limine config to log
 {
     echo ""
-    echo "â•â•â•â• LIMINE CONFIG DUMP â•â•â•â•"
+    echo "════ LIMINE CONFIG DUMP ════"
     echo ""
     echo "--- /mnt/boot/limine/limine.cfg ---"
     cat /mnt/boot/limine/limine.cfg 2>&1 || true
@@ -2568,7 +2352,7 @@ setup_firstboot
     echo "--- efibootmgr ---"
     efibootmgr -v 2>&1 || true
     echo ""
-    echo "â•â•â•â• END LIMINE CONFIG DUMP â•â•â•â•"
+    echo "════ END LIMINE CONFIG DUMP ════"
 } >> "$LOGFILE" 2>&1
 
 dump_state "final state"
@@ -2578,19 +2362,19 @@ cp "$LOGFILE" /mnt/var/log/niixarch-install.log 2>/dev/null || true
 
 finish
 
-# â”€â”€ Copy logs to USB drive â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Copy logs to USB drive ──────────────────────────────────
 copy_logs_to_usb() {
     hr "Save Logs to USB"
     info "Looking for a USB drive to copy logs to..."
 
-    # Find which drive is running the live ISO â€” exclude it
+    # Find which drive is running the live ISO — exclude it
     ISO_DEV=""
     # Try multiple archiso mount points
     for mnt in /run/archiso/bootmnt /run/archiso/airootfs; do
         src=$(findmnt -n -o SOURCE "$mnt" 2>/dev/null | head -1)
         if [[ -n "$src" ]]; then
             parent=$(lsblk -no PKNAME "$src" 2>/dev/null | head -1)
-            # Handle nested parents (e.g. ventoy â†’ sda1 â†’ sda)
+            # Handle nested parents (e.g. ventoy → sda1 → sda)
             while [[ -n "$parent" ]]; do
                 grandparent=$(lsblk -no PKNAME "/dev/$parent" 2>/dev/null | head -1)
                 [[ -n "$grandparent" ]] && parent="$grandparent" || break
@@ -2637,7 +2421,7 @@ copy_logs_to_usb() {
 
     if [[ ${#USB_PARTS[@]} -eq 0 ]]; then
         warn "No other USB drive found. Logs saved to:"
-        echo -e "    ${YELLOW}${LOGFILE}${NC}  (live ISO â€” lost on reboot)"
+        echo -e "    ${YELLOW}${LOGFILE}${NC}  (live ISO — lost on reboot)"
         echo -e "    ${YELLOW}/var/log/niixarch-install.log${NC}  (installed system)"
         return
     fi
@@ -2686,7 +2470,7 @@ copy_logs_to_usb() {
 
         log "Logs saved to USB ($USB_LABEL)"
     else
-        warn "Could not mount $USB_DEV â€” logs not copied to USB"
+        warn "Could not mount $USB_DEV — logs not copied to USB"
     fi
 }
 
