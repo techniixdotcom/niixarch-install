@@ -1,33 +1,40 @@
-============================================================
-  
-  Arch Linux Dual Boot Installer
-  Works on any UEFI PC with Windows pre-installed
+# NiiX Arch Installer
 
-  Requirements:
-    - UEFI system (not legacy BIOS)
-    - Secure Boot OFF in BIOS (Limine doesn't support it)
-    - Free/unallocated space on any internal drive, OR an
-      existing partition to delete (script will offer both)
-    - Internet connection on the Arch live ISO
+A fully automated Arch Linux installer that sets up a modern, gaming‑ready system with LUKS2 encryption, Btrfs snapshots, the CachyOS kernel, GNOME desktop, and a complete gaming toolchain – all with minimal user input.
 
-  Hardcoded preferences:
-    Keyboard   : us
-    
-    Locale     : en_GB.UTF-8
-    
-    Mirrors    : Switzerland
-    
-    Desktop    : GNOME
-    
-    Bootloader : Limine (UEFI)
-    
-    Encryption : LUKS2
-    
-    Filesystem : Btrfs with subvolumes
-    
-    Swap       : none
+> **Website:** 
+https://arch.niiix.net
 
-  HOW TO RUN from the Arch ISO:
-============================================================
-    bash <(curl -s https://arch.niiix.net/install | tr -d '\r')
-============================================================
+---
+
+## ✨ Features
+
+- **Dual‑boot or single‑boot** – Detects Windows automatically, preserves existing OS in dual‑boot mode.
+- **Full disk encryption** – LUKS2 with a custom passphrase.
+- **Btrfs subvolumes** – `@`, `@home`, `@snapshots`, `@var_log` – ready for Snapper snapshots.
+- **Limine bootloader** – Clean, fast, and secure (UEFI only).
+- **CachyOS kernel** – BORE scheduler, installed automatically on first boot.
+- **GPU auto‑detection** – Installs the right drivers for AMD, NVIDIA, or Intel (including open kernel modules for Turing+).
+- **Gaming optimisations** – GameMode, MangoHud, GE‑Proton, DXVK, ntsync, and AUR helpers (yay) out of the box.
+- **Security & performance** – UFW firewall, DNS‑over‑TLS, MAC randomisation for WiFi, ZRAM swap, and optional CPU mitigations.
+- **First‑boot automation** – Installs CachyOS kernel, AUR packages, flatpaks, sets GNOME preferences, and downloads the NiiX wallpaper – all without further user interaction.
+
+---
+
+## 📋 Requirements
+
+- **UEFI system** (Legacy BIOS is not supported)
+- **Secure Boot disabled** – Limine does not support it
+- **Internet connection** while running the Arch Linux live ISO
+- **At least 10 GiB** of free disk space (or an entire drive to wipe)
+
+---
+
+## 🚀 How to run
+
+1. Boot the [Arch Linux live ISO](https://archlinux.org/download/).
+2. Connect to the internet (use `iwctl` if you need WiFi).
+3. Run the installer with this **single command**:
+
+```bash
+bash <(curl -s https://arch.niiix.net/install | tr -d '\r')
