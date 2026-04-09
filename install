@@ -13,7 +13,7 @@
 #    - Internet connection on the Arch live ISO
 #
 #  Hardcoded preferences:
-#    Keyboard   : us
+#    Keyboard   : us / ch
 #    Locale     : en_GB.UTF-8
 #    Mirrors    : Switzerland
 #    Desktop    : GNOME
@@ -670,21 +670,39 @@ gather_input() {
     [[ -n "$USERNAME" ]] || err "Username cannot be empty"
 
     echo
-    ask "User & root password:"
-    read -rsp "  > " USER_PASS; echo
-    [[ -n "$USER_PASS" ]] || err "Password cannot be empty"
-    ask "Confirm password:"
-    read -rsp "  > " USER_PASS2; echo
-    [[ "$USER_PASS" == "$USER_PASS2" ]] || err "Passwords do not match"
+    while true; do
+        ask "User & root password:"
+        read -rsp "  > " USER_PASS; echo
+        if [[ -z "$USER_PASS" ]]; then
+            warn "Password cannot be empty — please try again."
+            continue
+        fi
+        ask "Confirm password:"
+        read -rsp "  > " USER_PASS2; echo
+        if [[ "$USER_PASS" != "$USER_PASS2" ]]; then
+            warn "Passwords do not match — please try again."
+        else
+            break
+        fi
+    done
 
     echo
     warn "LUKS passphrase — typed every time you boot into Arch:"
-    ask "LUKS passphrase:"
-    read -rsp "  > " LUKS_PASS; echo
-    [[ -n "$LUKS_PASS" ]] || err "LUKS passphrase cannot be empty"
-    ask "Confirm LUKS passphrase:"
-    read -rsp "  > " LUKS_PASS2; echo
-    [[ "$LUKS_PASS" == "$LUKS_PASS2" ]] || err "LUKS passphrases do not match"
+    while true; do
+        ask "LUKS passphrase:"
+        read -rsp "  > " LUKS_PASS; echo
+        if [[ -z "$LUKS_PASS" ]]; then
+            warn "LUKS passphrase cannot be empty — please try again."
+            continue
+        fi
+        ask "Confirm LUKS passphrase:"
+        read -rsp "  > " LUKS_PASS2; echo
+        if [[ "$LUKS_PASS" != "$LUKS_PASS2" ]]; then
+            warn "LUKS passphrases do not match — please try again."
+        else
+            break
+        fi
+    done
 
     echo
     ask "Timezone (press Enter for Europe/Zurich):"
@@ -899,12 +917,16 @@ install_base() {
     log "Installing base system (this takes 10-20 minutes)..."
     pacstrap /mnt \
         base base-devel linux linux-firmware \
-        networkmanager efibootmgr \
+        networkmanager wpa_supplicant efibootmgr \
         sudo nano vim git wget curl \
         ntfs-3g dosfstools \
         btrfs-progs cryptsetup \
         limine \
-        pipewire pipewire-alsa pipewire-pulse wireplumber
+        pipewire pipewire-alsa pipewire-pulse wireplumber \
+        bluez bluez-utils \
+        iio-sensor-proxy \
+        dconf \
+        unzip
 
     log "Base system installed"
 }
@@ -912,17 +934,31 @@ install_base() {
 # ── CachyOS repo + kernel ────────────────────────────────────
 # (CachyOS kernel installed during first-boot — needs live system for PGP keys)
 
+# ── Enable multilib + parallel downloads (must run before any package install) ──
+enable_multilib() {
+    hr "Enabling multilib"
+    info "Enabling multilib repository and parallel downloads..."
+
+    if ! grep -q "^\[multilib\]" /mnt/etc/pacman.conf; then
+        sed -i '/^#\[multilib\]/,/^#Include/ s/^#//' /mnt/etc/pacman.conf
+        log "multilib enabled"
+    else
+        log "multilib already enabled"
+    fi
+
+    sed -i 's/^#ParallelDownloads.*/ParallelDownloads = 5/' /mnt/etc/pacman.conf
+    log "Parallel downloads set to 5"
+
+    arch-chroot /mnt pacman -Sy --noconfirm
+    log "Package databases synced"
+}
+
 # ── GPU drivers (auto-detected) ──────────────────────────────
 install_gpu_drivers() {
     hr "GPU Driver Install"
     info "Installing $GPU_VENDOR GPU drivers..."
 
-    # Enable multilib for 32-bit libraries (needed by GPU drivers + Steam)
-    if ! grep -q "^\[multilib\]" /mnt/etc/pacman.conf; then
-        sed -i '/^#\[multilib\]/,/^#Include/ s/^#//' /mnt/etc/pacman.conf
-    fi
-    # Parallel downloads
-    sed -i 's/^#ParallelDownloads.*/ParallelDownloads = 5/' /mnt/etc/pacman.conf
+    # multilib and parallel downloads already enabled by enable_multilib() — just refresh
     arch-chroot /mnt pacman -Sy --noconfirm
 
     case "$GPU_VENDOR" in
@@ -993,7 +1029,6 @@ install_packages() {
         linux-headers \
         gamemode lib32-gamemode mangohud lib32-mangohud \
         ananicy-cpp \
-        steam \
         lib32-alsa-plugins lib32-libpulse lib32-openal \
         lib32-gst-plugins-base lib32-gst-plugins-good \
         ufw \
@@ -1003,9 +1038,21 @@ install_packages() {
         dnsmasq \
         snapper snap-pac \
         gnome-terminal \
-        fastfetch libva-utils dmidecode \
+        libva-utils dmidecode \
         gnome-shell-extension-appindicator \
         reflector
+
+    # Steam — requires multilib; installed separately so a failure is explicit
+    info "Installing Steam..."
+    arch-chroot /mnt pacman -S --noconfirm --needed steam \
+        || err "Steam failed to install — check multilib is enabled in /mnt/etc/pacman.conf"
+    log "Steam installed"
+
+    # fastfetch — installed separately so a failure is explicit
+    info "Installing fastfetch..."
+    arch-chroot /mnt pacman -S --noconfirm --needed fastfetch \
+        || err "fastfetch failed to install"
+    log "fastfetch installed" 
 
     # CPU microcode
     case "$CPU_VENDOR" in
@@ -1088,60 +1135,131 @@ ufw allow 27031:27036/udp 2>/dev/null || true
 # ufw will start on boot via systemctl enable ufw
 FWEOF
 
-    # ── MAC randomization (WiFi only) ───────────────────────────
-    # Ethernet is intentionally excluded — applying connection.stable-id
-    # globally (with ${BOOT}) forces a new DHCP lease on every boot,
-    # causing a ~10s stall before the network comes up.
+    # ── NetworkManager configuration ────────────────────────
     mkdir -p /mnt/etc/NetworkManager/conf.d
-    cat > /mnt/etc/NetworkManager/conf.d/30-mac-randomize.conf <<'MACEOF'
-[device-wifi-scan]
+
+    # Use systemd-resolved for DNS — stops NM from fighting with dnsmasq
+    # (dnsmasq is installed for hotspot support but must not be the global DNS)
+    cat > /mnt/etc/NetworkManager/conf.d/10-dns.conf <<'NMEOF'
+[main]
+dns=systemd-resolved
+systemd-resolved=true
+NMEOF
+
+    # Connectivity check — fixes the ? icon on WiFi, confirms internet is up
+    cat > /mnt/etc/NetworkManager/conf.d/20-connectivity.conf <<'CONNEOF'
+[connectivity]
+uri=http://nmcheck.gnome.org/check_network_status.txt
+response=NetworkManager is online
+interval=300
+CONNEOF
+
+    # WiFi MAC randomization — scoped to WiFi only so Ethernet stays stable
+    cat > /mnt/etc/NetworkManager/conf.d/30-wifi-privacy.conf <<'MACEOF'
+[device]
 match-device=type:wifi
 wifi.scan-rand-mac-address=yes
 
-[connection-wifi-privacy]
+[connection]
 match-device=type:wifi
 wifi.cloned-mac-address=random
 connection.stable-id=${CONNECTION}/${BOOT}
 MACEOF
 
-    # ── NetworkManager DNS backend ───────────────────────────
-    # Explicitly set NM to hand DNS off to systemd-resolved.
-    # Without this, NM may try to use dnsmasq as its DNS plugin
-    # (because dnsmasq is installed for hotspot use), which conflicts
-    # with resolved and causes slow/broken DNS resolution at boot.
-    # dnsmasq is still available and NM still invokes it for hotspots —
-    # this only stops NM from using it as the global DNS backend.
-    cat > /mnt/etc/NetworkManager/conf.d/10-dns-resolved.conf <<'NMEOF'
-[main]
-dns=systemd-resolved
-systemd-resolved=false
-NMEOF
-
-    # ── Ethernet link stability ──────────────────────────────
-    # The ethernet NIC drops carrier during auto-negotiation with the switch
-    # (speed/duplex handshake), which causes NM to cancel a DHCP transaction
-    # mid-flight and restart it — adding 20-30s before a lease is obtained.
-    # ignore-carrier tells NM not to abort DHCP when the carrier briefly drops.
-    # carrier-wait-timeout gives the link extra time to stabilise before NM
-    # starts the DHCP transaction in the first place.
-    cat > /mnt/etc/NetworkManager/conf.d/20-ethernet-stability.conf <<'ETHEOF'
-[device-ethernet]
+    # Ethernet stability — prevents NM from aborting DHCP during link negotiation
+    cat > /mnt/etc/NetworkManager/conf.d/40-ethernet.conf <<'ETHEOF'
+[device]
 match-device=type:ethernet
-ignore-carrier=yes
-carrier-wait-timeout=2000
+ethernet.wake-on-lan=ignore
 ETHEOF
 
-    # ── DNS-over-TLS (Cloudflare) ────────────────────────────
-    # DNSOverTLS=opportunistic — uses TLS when available but falls back
-    # instantly rather than stalling boot waiting for a TLS handshake.
-    # DNSOverTLS=yes (hard) adds several seconds of delay on every boot.
+    # ── Import WiFi credentials from live ISO (iwd → NM keyfile) ──────────
+    # The Arch live ISO uses iwd for WiFi. If the user connected via iwctl,
+    # their credentials are in /var/lib/iwd/<SSID>.psk on the live system.
+    # We convert them to NM keyfiles so the installed system auto-connects
+    # on first boot — without ever installing iwd (it conflicts with wpa_supplicant).
+    # Safe to skip: if no .psk files exist (ethernet-only install), nothing happens.
+    mkdir -p /mnt/etc/NetworkManager/system-connections
+
+    IWD_DIR="/var/lib/iwd"
+    if compgen -G "${IWD_DIR}/*.psk" > /dev/null 2>&1; then
+        info "Found iwd WiFi profiles — importing into NetworkManager..."
+        local imported=0
+        for psk_file in "${IWD_DIR}"/*.psk; do
+            [[ -f "$psk_file" ]] || continue
+
+            # SSID is the filename without the .psk extension
+            local ssid
+            ssid=$(basename "$psk_file" .psk)
+            [[ -z "$ssid" ]] && continue
+
+            # Read the credential — iwd uses either PreSharedKey= (64-char hex)
+            # or Passphrase= (human-readable). NM accepts both in psk=.
+            local psk_value=""
+            local psk_line
+            psk_line=$(grep -m1 "^PreSharedKey=" "$psk_file" 2>/dev/null || true)
+            if [[ -n "$psk_line" ]]; then
+                psk_value="${psk_line#PreSharedKey=}"
+            else
+                local pass_line
+                pass_line=$(grep -m1 "^Passphrase=" "$psk_file" 2>/dev/null || true)
+                [[ -n "$pass_line" ]] && psk_value="${pass_line#Passphrase=}"
+            fi
+
+            if [[ -z "$psk_value" ]]; then
+                warn "iwd profile '$ssid' has no PSK or Passphrase — skipping"
+                continue
+            fi
+
+            # Sanitise SSID for use as a filename: replace / and NUL with _
+            local safe_name
+            safe_name=$(printf '%s' "$ssid" | tr '/' '_')
+
+            # Write a minimal NM keyfile — NM reads this on startup and connects
+            local nm_file="/mnt/etc/NetworkManager/system-connections/${safe_name}.nmconnection"
+            cat > "$nm_file" <<NMWIFI
+[connection]
+id=${ssid}
+type=wifi
+autoconnect=true
+
+[wifi]
+ssid=${ssid}
+mode=infrastructure
+
+[wifi-security]
+key-mgmt=wpa-psk
+psk=${psk_value}
+
+[ipv4]
+method=auto
+
+[ipv6]
+method=auto
+addr-gen-mode=stable-privacy
+NMWIFI
+
+            # NM silently ignores keyfiles that are not chmod 600 owned by root
+            chmod 600 "$nm_file"
+
+            log "WiFi imported: '$ssid' → ${safe_name}.nmconnection"
+            imported=$(( imported + 1 ))
+        done
+        [[ "$imported" -eq 0 ]] && warn "iwd profiles found but none could be imported"             || log "$imported WiFi profile(s) imported — will auto-connect on first boot"
+    else
+        info "No iwd WiFi profiles found (ethernet or WiFi not used during install) — skipping"
+    fi
+
+    # ── systemd-resolved DNS config ─────────────────────────
+    # Keep it simple — no DNSSEC/DoT which can silently break resolution
+    # on many home/corporate networks. Cloudflare as primary, Quad9 fallback.
     mkdir -p /mnt/etc/systemd/resolved.conf.d
-    cat > /mnt/etc/systemd/resolved.conf.d/dns-over-tls.conf <<'DNSEOF'
+    cat > /mnt/etc/systemd/resolved.conf.d/dns.conf <<'DNSEOF'
 [Resolve]
-DNS=1.1.1.1#cloudflare-dns.com 1.0.0.1#cloudflare-dns.com
-FallbackDNS=9.9.9.9#dns.quad9.net 149.112.112.112#dns.quad9.net
-DNSOverTLS=opportunistic
-DNSSEC=allow-downgrade
+DNS=1.1.1.1 1.0.0.1
+FallbackDNS=9.9.9.9 149.112.112.112
+DNSSEC=no
+DNSOverTLS=no
 DNSEOF
 
     # (LAVD scheduler set up during first-boot with CachyOS kernel)
@@ -1213,22 +1331,27 @@ EOF
 
 sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
 
-# Enable services
+# ── Critical networking services — these MUST succeed ────
+# Placed first, before set -e can be triggered by anything else.
+# If these fail the system will have no network after boot.
 systemctl enable NetworkManager
-systemctl enable ananicy-cpp
-systemctl enable irqbalance
-systemctl enable ufw
-systemctl enable power-profiles-daemon
+systemctl enable wpa_supplicant
 systemctl enable systemd-resolved
-systemctl enable niixarch-update.timer
 
-# Disable NetworkManager-wait-online — it blocks boot until full network
-# connectivity is confirmed, adding seconds of delay on every start.
-# GNOME handles network state itself; this service is not needed.
+# ── resolv.conf → systemd-resolved stub ──────────────────
+# rm -f first — ln -sf will NOT overwrite a regular file on all kernels.
+rm -f /etc/resolv.conf
+ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+
+# ── Optional services — || true so a missing package can't kill the chroot ──
+systemctl enable ananicy-cpp           2>/dev/null || true
+systemctl enable irqbalance            2>/dev/null || true
+systemctl enable ufw                   2>/dev/null || true
+systemctl enable power-profiles-daemon 2>/dev/null || true
+systemctl enable niixarch-update.timer 2>/dev/null || true
+systemctl enable bluetooth             2>/dev/null || true
+systemctl enable iio-sensor-proxy      2>/dev/null || true
 systemctl disable NetworkManager-wait-online.service 2>/dev/null || true
-
-# Symlink resolv.conf for DNS-over-TLS (|| true — may already exist)
-ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf || true
 
 # ── Snapper — Btrfs snapshot management ──────────────────
 # snap-pac auto-creates pre/post snapshots on every pacman transaction.
@@ -1592,12 +1715,15 @@ gsettings set org.gnome.desktop.interface gtk-theme 'Adwaita-dark' 2>/dev/null |
 gsettings set org.gnome.desktop.interface enable-animations false 2>/dev/null || true
 gsettings set org.gnome.desktop.sound event-sounds false 2>/dev/null || true
 gsettings set org.gnome.desktop.session idle-delay 0 2>/dev/null || true
-gsettings set org.gnome.settings-daemon.plugins.power power-button-action 'nothing' 2>/dev/null || true
+gsettings set org.gnome.settings-daemon.plugins.power power-button-action 'poweroff' 2>/dev/null || true
 gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing' 2>/dev/null || true
 gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-type 'nothing' 2>/dev/null || true
 gsettings set org.gnome.mutter dynamic-workspaces false 2>/dev/null || true
 gsettings set org.gnome.desktop.wm.preferences num-workspaces 1 2>/dev/null || true
 gsettings set org.gnome.desktop.notifications show-in-lock-screen false 2>/dev/null || true
+gsettings set org.gnome.desktop.interface accent-color 'pink' 2>/dev/null || true
+gsettings set org.gnome.desktop.interface show-battery-percentage true 2>/dev/null || true
+gsettings set org.gnome.desktop.wm.preferences button-layout 'appmenu:minimize,maximize,close' 2>/dev/null || true
 
 # Ctrl+Alt+T terminal shortcut
 gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/']" 2>/dev/null || true
@@ -1605,10 +1731,14 @@ gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/or
 gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ command "gnome-terminal" 2>/dev/null || true
 gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ binding "<Control><Alt>t" 2>/dev/null || true
 
-# Enable AppIndicator (tray icons) + dash pinned apps
+# Enable AppIndicator (tray icons)
 gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com 2>/dev/null || true
-gsettings set org.gnome.shell favorite-apps "['org.gnome.Nautilus.desktop', 'org.gnome.Terminal.desktop', 'steam.desktop', 'com.heroicgameslauncher.hgl.desktop']" 2>/dev/null || true
 log "GNOME settings applied"
+
+# ── Bluetooth — ensure service is running ────────────────
+# Safety net: enables+starts bluetooth even on systems installed
+# before the chroot fix. Harmless if already enabled.
+sudo systemctl enable --now bluetooth 2>/dev/null || true
 
 # ── Performance profile ───────────────────────────────────
 sudo powerprofilesctl set performance 2>/dev/null || true
@@ -1699,7 +1829,7 @@ if _nm_connected; then
     log "Network ready"
 else
     info "Waiting for network connectivity (no timeout — will wait as long as needed)..."
-    local attempt=0
+    attempt=0
     until _nm_connected; do
         attempt=$(( attempt + 1 ))
         echo -ne "\r  ·  Waiting for network... (attempt $attempt)"
@@ -1927,6 +2057,27 @@ if [ -n "$GEPROTON_TAG" ]; then
 else
     warn "Could not fetch GE-Proton — install via ProtonUp-Qt later"
 fi
+
+# ── Pin apps to GNOME Dash ──────────────────────────────
+# Desktop IDs confirmed from live system ls /usr/share/applications/:
+#   helium.desktop              (helium-browser-bin AUR)
+#   heroic.desktop              (heroic-games-launcher-bin AUR)
+#   steam.desktop               (steam AUR)
+#   com.stremio.Stremio.desktop (Stremio Flatpak)
+# gsettings is unreliable from a terminal — no dconf session daemon.
+# dconf system override writes to the filesystem directly, no session needed.
+info "Pinning apps to GNOME Dash via dconf system override..."
+sudo mkdir -p /etc/dconf/db/local.d /etc/dconf/profile
+if ! grep -q "system-db:local" /etc/dconf/profile/user 2>/dev/null; then
+    printf 'user-db:user\nsystem-db:local\n' | sudo tee /etc/dconf/profile/user > /dev/null
+fi
+sudo tee /etc/dconf/db/local.d/00-niixarch-dash > /dev/null << 'DCONFEOF'
+[org/gnome/shell]
+favorite-apps=['org.gnome.Nautilus.desktop', 'org.gnome.Terminal.desktop', 'helium.desktop', 'com.stremio.Stremio.desktop', 'steam.desktop', 'heroic.desktop']
+DCONFEOF
+sudo dconf update 2>/dev/null \
+    && log "Dash pinned: Nautilus · Terminal · Helium · Stremio · Steam · Heroic" \
+    || warn "dconf update failed — Dash pinning may not apply"
 
 # ── Cleanup ───────────────────────────────────────────────
 sudo rm -f /etc/xdg/autostart/niixarch-firstboot.desktop
@@ -2303,6 +2454,7 @@ dump_state "after btrfs + clean_efi"
 
 # ── Install + configure (same for both modes) ────────────────
 install_base
+enable_multilib
 install_gpu_drivers
 install_packages
 
@@ -2361,6 +2513,156 @@ dump_state "final state"
 cp "$LOGFILE" /mnt/var/log/niixarch-install.log 2>/dev/null || true
 
 finish
+
+
+# ============================================================================
+
+#   If you are reading this, you found the temple.
+#   It was built for four people who did what needed doing.
+#   This comment does nothing. That was always the point.
+
+#
+#                              /\
+#                             /  \
+#                            / /\ \
+#                           / /  \ \
+#                          / / W  \ \
+#                         / /  T   \ \
+#                        / /   D    \ \
+#                       / /    S     \ \
+#                      //_____________\ \
+#                     //               \\
+#                    //  ___       ___  \\
+#                   //  |   |     |   |  \\
+#                  //   | A |     | T |   \\
+#                 //    |   |     |   |    \\
+#                //     |___|     |___|     \\
+#               //       | |       | |      \\
+#              //   ___  | |  ___  | |  ___  \\
+#             //   |   | | | |   | | | |   |  \\
+#            //    | A | | | |   | | | | T |   \\
+#           //     |   | | | |   | | | |   |    \\
+#          //      |___| | | |___| | | |___|     \\
+#         //        | |  | |  | |  | |  | |       \\
+#        //    ___  | |  | |  | |  | |  | |  ___   \\
+#       //    |   | | |  | |  | |  | |  | | |   |   \\
+#      //     | A | | |  | |  | |  | |  | | | N |    \\
+#     //      |   | | |  | |  | |  | |  | | |   |     \\
+#    //       |___| | |  | |  | |  | |  | | |___|      \\
+#   //____________________________________________________\\
+#   |                                                      |
+#   |          T E M P L E   O F   T H E   R A M          |
+#   |                                                      |
+#   |______________________________________________________|
+#   |||  |||  |||  |||  |||  |||  |||  |||  |||  |||  |||
+#   |||  |||  |||  |||  |||  |||  |||  |||  |||  |||  |||
+#
+#   A = Alan Turing      T = Terry Davis
+#   A = Aaron Swartz     N = Nicholas Winton
+
+# ============================================================================
+
+# ALAN MATHISON TURING  //  1912 - 1954
+
+# ============================================================================
+
+#   He asked whether machines could think before anyone
+#   had built one worth asking about.
+#   He broke Enigma. He shortened the war by years.
+#   He saved millions of lives and was never allowed to know
+#   that he had, because it was classified.
+
+#   The country he saved chemically castrated him
+#   for being gay. He died at 41, alone, an apple beside him.
+#   Every computer that has ever run anything
+#   is a footnote to his 1936 paper.
+
+#   "We can only see a short distance ahead,
+#    but we can see plenty there that needs to be done."
+
+# ============================================================================
+
+# TERRY ANDREW DAVIS  //  1969 - 2018
+
+# ============================================================================
+
+#   He built an entire operating system alone.
+#   640x480. One process. No multitasking. Talked to God
+#   in a language he wrote himself, on a machine he trusted
+#   completely because he understood every layer of it.
+
+#   TempleOS was not a joke. It was a cathedral.
+#   He finished it. That is more than most people do.
+
+#   "The compiler is proof that God loves us."
+
+# ============================================================================
+
+# AARON HILLEL SWARTZ  //  1986 - 2013
+
+# ============================================================================
+
+#   He was 14 when he helped draft RSS.
+#   He helped build Creative Commons. He built Tor2web.
+#   He co-founded Reddit and walked away from the money.
+#   He believed that knowledge locked behind a paywall
+#   was a violence done to the world, and he was right.
+
+#   They offered him 35 years for downloading journal articles.
+#   He was 26. He had already changed the internet twice.
+
+#   "Information is power. But like all power, there are
+#    those who want to keep it for themselves."
+
+# ============================================================================
+
+# SIR NICHOLAS WINTON  //  1909 - 2015
+
+# ============================================================================
+
+#   Not a builder of machines. A builder of something harder.
+
+#   In 1938, a 29-year-old stockbroker cancelled his skiing
+#   holiday and went to Prague instead.
+#   He found Jewish families desperate to get their children
+#   out before the Nazis arrived.
+
+#   He organised eight trains.
+#   669 children. Forged documents. Bribes. Paperwork.
+#   He did it with a scrapbook and a typewriter
+#   and told nobody for fifty years.
+
+#   His wife found the scrapbook in the attic in 1988.
+#   He was in the audience of a BBC programme.
+#   The host asked if anyone recognised the names
+#   in the book she was holding.
+#   Every person in the room stood up.
+#   They were his children.
+
+#   He lived to 106. He never thought he had done
+#   anything particularly remarkable.
+
+#   "If something is not impossible, there must be
+#    a way to do it."
+
+# ============================================================================
+
+#   Four people. None of them asked for recognition.
+#   One proved the machine was possible.
+#   One talked to God inside it.
+#   One tried to make sure it belonged to everyone.
+#   One just went to Prague and got to work.
+#   The world is better for all four of them.
+#   Read the source. Keep it open. Keep building.
+#   And if something is not impossible - do it.
+
+#                    +-------------------------+
+#                    |   "You are loved."      |
+#                    |        - Terry          |
+#                    +-------------------------+
+
+
+
 
 # ── Copy logs to USB drive ──────────────────────────────────
 copy_logs_to_usb() {
