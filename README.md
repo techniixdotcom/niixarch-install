@@ -29,8 +29,6 @@ https://arch.niiix.net
 - **At least 10 GiB** of free disk space (or an entire drive to wipe)
 
 ---
-## Stargazers over time
-[![Stargazers over time](https://starchart.cc/JaKooLit/Arch-Hyprland.svg?variant=adaptive)](https://starchart.cc/JaKooLit/Arch-Hyprland)
 
 ## 🚀 How to run
 
