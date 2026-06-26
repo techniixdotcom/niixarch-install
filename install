@@ -1,9 +1,10 @@
-# !/bin/bash
+#!/bin/bash
 # ============================================================
 #  NiiX Arch Installer  //  arch.niiix.net
 #  Modes   : Dual-boot (Arch + Windows)  |  Single-boot (bare drive)
-#  Stack   : LUKS2 · Btrfs · Limine · CachyOS · GNOME
-#  Extras  : Auto GPU drivers · Gaming tools · Security hardening
+#  Stack   : LUKS2 · Btrfs · Limine · CachyOS · GNOME 
+#  Desktop : dash-to-panel + ArcMenu + auto-rotate 
+#  Extras  : Auto GPU drivers · Gaming (Steam/Lutris/Heroic) · Wi-Fi hotspot
 #
 #  Requirements:
 #    - UEFI system (not legacy BIOS)
@@ -45,6 +46,16 @@ WHITE='\033[1;37m'
 DIM='\033[2;37m'
 BOLD='\033[1m'
 NC='\033[0m'
+
+# ── Embedded NiiX logo (256x256 PNG, base64) ─────────────────
+# Used for: GNOME About-page distributor logo, ArcMenu start-button icon.
+# Written to the target system by write_logo() during install.
+NIIX_LOGO_B64="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"
+
+# ── Embedded NiiX icon theme (Tabler-glyph squircles, base64 .tar.gz) ─
+# Flat dark icons matching the desktop preview; teal + pink accents.
+# Extracted to /usr/share/icons/NiiX by write_icons() during install.
+NIIX_ICONS_B64="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"
 
 # ── Hardcoded preferences ────────────────────────────────────
 KEYMAP="us"        # console keymap  (loadkeys / vconsole.conf) — set by gather_input
@@ -924,8 +935,8 @@ install_base() {
     log "Installing base system (this takes 10-20 minutes)..."
     pacstrap /mnt \
         base base-devel linux linux-firmware \
-        networkmanager wpa_supplicant efibootmgr \
-        sudo nano vim git wget curl \
+        networkmanager wpa_supplicant iw efibootmgr \
+        sudo nano vim git wget curl python \
         ntfs-3g dosfstools \
         btrfs-progs cryptsetup \
         limine \
@@ -1035,6 +1046,9 @@ install_packages() {
     arch-chroot /mnt pacman -S --noconfirm --needed \
         linux-headers \
         gamemode lib32-gamemode mangohud lib32-mangohud \
+        gamescope \
+        wine winetricks \
+        vkd3d lib32-vkd3d \
         ananicy-cpp \
         lib32-alsa-plugins lib32-libpulse lib32-openal \
         lib32-gst-plugins-base lib32-gst-plugins-good \
@@ -1054,6 +1068,12 @@ install_packages() {
     arch-chroot /mnt pacman -S --noconfirm --needed steam \
         || err "Steam failed to install — check multilib is enabled in /mnt/etc/pacman.conf"
     log "Steam installed"
+
+    # Lutris — requested; pinned to the panel during first-boot
+    info "Installing Lutris..."
+    arch-chroot /mnt pacman -S --noconfirm --needed lutris \
+        || err "Lutris failed to install"
+    log "Lutris installed"
 
     # fastfetch — installed separately so a failure is explicit
     info "Installing fastfetch..."
@@ -1097,12 +1117,16 @@ vm.swappiness=$swappiness
 vm.vfs_cache_pressure=50
 vm.compaction_proactiveness=0
 vm.watermark_boost_factor=0
+vm.max_map_count=2147483642
 kernel.nmi_watchdog=0
+kernel.split_lock_mitigate=0
 fs.inotify.max_user_watches=524288
 net.core.default_qdisc=fq
 net.ipv4.tcp_congestion_control=bbr
+net.ipv4.ip_forward=1
+net.ipv6.conf.all.forwarding=1
 SYSEOF
-    log "Sysctl tuned (swappiness=$swappiness for ${MEM_TOTAL_GB}GB RAM)"
+    log "Sysctl tuned (swappiness=$swappiness for ${MEM_TOTAL_GB}GB RAM; max_map_count + split-lock + IP-forward for gaming/hotspot)"
 
     # ── Transparent hugepages ────────────────────────────────
     mkdir -p /mnt/etc/tmpfiles.d
@@ -1133,14 +1157,97 @@ compression-algorithm = zstd
 ZRAMEOF
 
     # ── Firewall (configure rules — ufw starts on boot via systemctl) ──
+    # NetworkManager connection-sharing (hotspot) hands out 10.42.0.0/24 and
+    # runs its own per-interface dnsmasq. ufw's default "deny incoming" blocks
+    # the phone's DHCP (67/udp) + DNS (53) requests, and the default DROP
+    # forward policy breaks NAT — so the phone connects but never gets an IP.
+    # These rules fix exactly that.
     arch-chroot /mnt bash <<'FWEOF'
 ufw default deny incoming 2>/dev/null || true
 ufw default allow outgoing 2>/dev/null || true
+# Steam (in-home streaming / remote play)
 ufw allow 27036:27037/tcp 2>/dev/null || true
 ufw allow 27031:27036/udp 2>/dev/null || true
+# Hotspot: let clients on the shared subnet pull DHCP + DNS from us
+ufw allow in proto udp from 10.42.0.0/24 to any port 67 2>/dev/null || true
+ufw allow in proto udp from 10.42.0.0/24 to any port 53 2>/dev/null || true
+ufw allow in proto tcp from 10.42.0.0/24 to any port 53 2>/dev/null || true
 # Don't run 'ufw --force enable' in chroot — no iptables modules
 # ufw will start on boot via systemctl enable ufw
 FWEOF
+
+    # Hotspot NAT: ufw forwards must be ACCEPT or masquerading silently drops.
+    if [[ -f /mnt/etc/default/ufw ]]; then
+        sed -i 's/^DEFAULT_FORWARD_POLICY=.*/DEFAULT_FORWARD_POLICY="ACCEPT"/' \
+            /mnt/etc/default/ufw
+    fi
+    # IPv4 forwarding for ufw's own sysctl (matches 99-niixarch.conf)
+    if [[ -f /mnt/etc/ufw/sysctl.conf ]]; then
+        sed -i 's@^#*net/ipv4/ip_forward=.*@net/ipv4/ip_forward=1@' \
+            /mnt/etc/ufw/sysctl.conf
+    fi
+
+    # ── niix-hotspot helper — phone-friendly 2.4GHz WPA2 hotspot ─────────
+    # Defaults to 2.4GHz / channel 7 / WPA2-AES only. This is the combination
+    # phones reliably connect to: 5GHz AP mode fails on many adapters, WPA3/SAE
+    # is rejected by older phones, and TKIP is rejected by newer ones.
+    cat > /mnt/usr/local/bin/niix-hotspot <<'HSEOF'
+#!/bin/bash
+# niix-hotspot — start/stop a phone-friendly Wi-Fi hotspot
+#   niix-hotspot start [SSID] [PASSWORD]   (PASSWORD must be >= 8 chars)
+#   niix-hotspot stop
+#   niix-hotspot status
+set -uo pipefail
+CON="niix-hotspot"
+ACTION="${1:-}"
+SSID="${2:-NiiX-Arch}"
+PASS="${3:-niixarch1234}"
+
+WIFI_DEV=$(nmcli -t -f DEVICE,TYPE device 2>/dev/null | awk -F: '$2=="wifi"{print $1; exit}')
+
+usage(){ echo "Usage: niix-hotspot {start|stop|status} [SSID] [PASSWORD]"; }
+
+case "$ACTION" in
+  start)
+    [ -n "$WIFI_DEV" ] || { echo "No Wi-Fi device found."; exit 1; }
+    if [ "${#PASS}" -lt 8 ]; then echo "Password must be at least 8 characters."; exit 1; fi
+    nmcli connection delete "$CON" >/dev/null 2>&1 || true
+    nmcli connection add type wifi ifname "$WIFI_DEV" con-name "$CON" \
+        autoconnect no ssid "$SSID" >/dev/null
+    nmcli connection modify "$CON" \
+        802-11-wireless.mode ap \
+        802-11-wireless.band bg \
+        802-11-wireless.channel 7 \
+        802-11-wireless.powersave 2 \
+        ipv4.method shared \
+        ipv6.method ignore \
+        wifi-sec.key-mgmt wpa-psk \
+        wifi-sec.proto rsn \
+        wifi-sec.pairwise ccmp \
+        wifi-sec.group ccmp \
+        wifi-sec.pmf optional \
+        wifi-sec.psk "$PASS"
+    if nmcli connection up "$CON"; then
+        echo "Hotspot '$SSID' is UP on $WIFI_DEV  (2.4GHz, WPA2-AES)."
+        echo "Password: $PASS"
+    else
+        echo "Failed to start hotspot. Check: nmcli -f WIFI-PROPERTIES.AP device show $WIFI_DEV"
+        exit 1
+    fi
+    ;;
+  stop)
+    nmcli connection down "$CON" >/dev/null 2>&1 || true
+    echo "Hotspot stopped."
+    ;;
+  status)
+    nmcli -f GENERAL.STATE connection show "$CON" 2>/dev/null \
+        || echo "Hotspot is not active. Start it with: niix-hotspot start"
+    ;;
+  *) usage; exit 1 ;;
+esac
+HSEOF
+    chmod +x /mnt/usr/local/bin/niix-hotspot
+    log "niix-hotspot helper installed (run: niix-hotspot start)"
 
     # ── NetworkManager configuration ────────────────────────
     mkdir -p /mnt/etc/NetworkManager/conf.d
@@ -1359,6 +1466,10 @@ systemctl enable niixarch-update.timer 2>/dev/null || true
 systemctl enable bluetooth             2>/dev/null || true
 systemctl enable iio-sensor-proxy      2>/dev/null || true
 systemctl disable NetworkManager-wait-online.service 2>/dev/null || true
+# Mask the standalone dnsmasq service: NetworkManager runs its OWN per-interface
+# dnsmasq for the hotspot. A system-wide dnsmasq on port 53 would conflict and
+# break the hotspot's DHCP/DNS. The binary stays installed for NM to use.
+systemctl mask dnsmasq                  2>/dev/null || true
 
 # ── Snapper — Btrfs snapshot management ──────────────────
 # snap-pac auto-creates pre/post snapshots on every pacman transaction.
@@ -1398,6 +1509,325 @@ CHROOT
     log "System configured"
 }
 
+# ── Write the embedded NiiX logo onto the target system ──────
+# Decodes NIIX_LOGO_B64 to PNG and installs it where GNOME + ArcMenu read it.
+write_logo() {
+    local pixmaps="/mnt/usr/share/pixmaps"
+    local brand="/mnt/etc/niixarch"
+    mkdir -p "$pixmaps" "$brand"
+    if printf '%s' "$NIIX_LOGO_B64" | base64 -d > "$pixmaps/niixarch-logo.png" 2>/dev/null \
+        && [[ -s "$pixmaps/niixarch-logo.png" ]]; then
+        cp "$pixmaps/niixarch-logo.png" "$brand/niixarch-logo.png"
+        # GNOME control-center "About" reads the distributor logo named after os-release LOGO=
+        cp "$pixmaps/niixarch-logo.png" "$pixmaps/niixarch.png"
+        log "NiiX logo installed (/usr/share/pixmaps/niixarch-logo.png)"
+    else
+        warn "Could not decode embedded logo — branding logo skipped"
+    fi
+}
+
+# ── Write the embedded NiiX icon theme onto the target system ─
+write_icons() {
+    local dest="/mnt/usr/share/icons"
+    mkdir -p "$dest"
+    if printf '%s' "$NIIX_ICONS_B64" | base64 -d | tar xz -C "$dest" 2>/dev/null \
+        && [[ -f "$dest/NiiX/index.theme" ]]; then
+        arch-chroot /mnt gtk-update-icon-cache -f /usr/share/icons/NiiX 2>/dev/null || true
+        log "NiiX icon theme installed ($(ls "$dest/NiiX/scalable/apps" | wc -l) app icons)"
+    else
+        warn "Could not extract embedded icon theme — icons skipped"
+    fi
+}
+
+# ── Auto-iconify: future apps adopt NiiX icons automatically ──
+# Installs the niix-iconify tool + a pacman hook + systemd watchers so that
+# any app installed later (pacman, AUR, or flatpak) gets a matching NiiX icon
+# generated on the fly. Curated icons are never overwritten.
+setup_auto_icons() {
+    log "Installing NiiX auto-iconify (future apps get NiiX icons automatically)..."
+
+    cat > /mnt/usr/local/bin/niix-iconify <<'NIIX_ICONIFY_EOF'
+#!/usr/bin/env python3
+# niix-iconify — auto-generate NiiX flat icons for installed apps.
+# Idempotent reconcile: scans .desktop files, and for any app icon not already
+# present in the NiiX theme, composes a matching flat squircle tile and writes it.
+# Curated icons (shipped with the theme) are never overwritten.
+#
+# Usage:
+#   niix-iconify                 reconcile (add missing icons)
+#   niix-iconify --quiet         no per-icon output
+#   niix-iconify --force         also regenerate previously auto-made icons
+#   niix-iconify --prune         remove auto-made icons no longer referenced
+#   niix-iconify --add NAME GLYPH [pink|teal]   add one icon by hand
+#   niix-iconify --list-glyphs   print available glyph names
+import os, re, sys, glob, subprocess
+
+THEME_DIR = "/usr/share/icons/NiiX/scalable/apps"
+AUTO_MARK = "<!--niix-auto-->"
+TEAL = "#5eead4"
+PINK = "#f0a6c0"
+TILE_FILL = "#121821"
+TILE_BORDER = "#1f2a33"
+
+DESKTOP_DIRS = [
+    "/usr/share/applications",
+    "/usr/local/share/applications",
+    "/var/lib/flatpak/exports/share/applications",
+]
+DESKTOP_DIRS += glob.glob("/home/*/.local/share/applications")
+DESKTOP_DIRS += glob.glob("/home/*/.local/share/flatpak/exports/share/applications")
+
+GLYPHS = {
+"device-gamepad-2": "<path d=\"M12 5h3.5a5 5 0 0 1 0 10h-5.5l-4.015 4.227a2.3 2.3 0 0 1 -3.923 -2.035l1.634 -8.173a5 5 0 0 1 4.904 -4.019h3.4\" /> <path d=\"M14 15l4.07 4.284a2.3 2.3 0 0 0 3.925 -2.023l-1.6 -8.232\" /> <path d=\"M8 9v2\" /> <path d=\"M7 10h2\" /> <path d=\"M14 10h2\" />",
+"message-circle": "<path d=\"M3 20l1.3 -3.9c-2.324 -3.437 -1.426 -7.872 2.1 -10.374c3.526 -2.501 8.59 -2.296 11.845 .48c3.255 2.777 3.695 7.266 1.029 10.501c-2.666 3.235 -7.615 4.215 -11.574 2.293l-4.7 1\" />",
+"world": "<path d=\"M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0\" /> <path d=\"M3.6 9h16.8\" /> <path d=\"M3.6 15h16.8\" /> <path d=\"M11.5 3a17 17 0 0 0 0 18\" /> <path d=\"M12.5 3a17 17 0 0 1 0 18\" />",
+"music": "<path d=\"M3 17a3 3 0 1 0 6 0a3 3 0 0 0 -6 0\" /> <path d=\"M13 17a3 3 0 1 0 6 0a3 3 0 0 0 -6 0\" /> <path d=\"M9 17v-13h10v13\" /> <path d=\"M9 8h10\" />",
+"movie": "<path d=\"M4 6a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2l0 -12\" /> <path d=\"M8 4l0 16\" /> <path d=\"M16 4l0 16\" /> <path d=\"M4 8l4 0\" /> <path d=\"M4 16l4 0\" /> <path d=\"M4 12l16 0\" /> <path d=\"M16 8l4 0\" /> <path d=\"M16 16l4 0\" />",
+"brush": "<path d=\"M3 21v-4a4 4 0 1 1 4 4h-4\" /> <path d=\"M21 3a16 16 0 0 0 -12.8 10.2\" /> <path d=\"M21 3a16 16 0 0 1 -10.2 12.8\" /> <path d=\"M10.6 9a9 9 0 0 1 4.4 4.4\" />",
+"photo": "<path d=\"M15 8h.01\" /> <path d=\"M3 6a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v12a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3v-12\" /> <path d=\"M3 16l5 -5c.928 -.893 2.072 -.893 3 0l5 5\" /> <path d=\"M14 14l1 -1c.928 -.893 2.072 -.893 3 0l3 3\" />",
+"camera": "<path d=\"M5 7h1a2 2 0 0 0 2 -2a1 1 0 0 1 1 -1h6a1 1 0 0 1 1 1a2 2 0 0 0 2 2h1a2 2 0 0 1 2 2v9a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-9a2 2 0 0 1 2 -2\" /> <path d=\"M9 13a3 3 0 1 0 6 0a3 3 0 0 0 -6 0\" />",
+"download": "<path d=\"M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2\" /> <path d=\"M7 11l5 5l5 -5\" /> <path d=\"M12 4l0 12\" />",
+"terminal-2": "<path d=\"M8 9l3 3l-3 3\" /> <path d=\"M13 15l3 0\" /> <path d=\"M3 6a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2l0 -12\" />",
+"code": "<path d=\"M7 8l-4 4l4 4\" /> <path d=\"M17 8l4 4l-4 4\" /> <path d=\"M14 4l-4 16\" />",
+"file-text": "<path d=\"M14 3v4a1 1 0 0 0 1 1h4\" /> <path d=\"M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2\" /> <path d=\"M9 9l1 0\" /> <path d=\"M9 13l6 0\" /> <path d=\"M9 17l6 0\" />",
+"calculator": "<path d=\"M4 5a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v14a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2l0 -14\" /> <path d=\"M8 8a1 1 0 0 1 1 -1h6a1 1 0 0 1 1 1v1a1 1 0 0 1 -1 1h-6a1 1 0 0 1 -1 -1l0 -1\" /> <path d=\"M8 14l0 .01\" /> <path d=\"M12 14l0 .01\" /> <path d=\"M16 14l0 .01\" /> <path d=\"M8 17l0 .01\" /> <path d=\"M12 17l0 .01\" /> <path d=\"M16 17l0 .01\" />",
+"table": "<path d=\"M3 5a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v14a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-14\" /> <path d=\"M3 10h18\" /> <path d=\"M10 3v18\" />",
+"presentation": "<path d=\"M3 4l18 0\" /> <path d=\"M4 4v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-10\" /> <path d=\"M12 16l0 4\" /> <path d=\"M9 20l6 0\" /> <path d=\"M8 12l3 -3l2 2l3 -3\" />",
+"book": "<path d=\"M3 19a9 9 0 0 1 9 0a9 9 0 0 1 9 0\" /> <path d=\"M3 6a9 9 0 0 1 9 0a9 9 0 0 1 9 0\" /> <path d=\"M3 6l0 13\" /> <path d=\"M12 6l0 13\" /> <path d=\"M21 6l0 13\" />",
+"mail": "<path d=\"M3 7a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v10a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-10\" /> <path d=\"M3 7l9 6l9 -6\" />",
+"folder": "<path d=\"M5 4h4l3 3h7a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-11a2 2 0 0 1 2 -2\" />",
+"settings": "<path d=\"M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065\" /> <path d=\"M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0\" />",
+"activity": "<path d=\"M3 12h4l3 8l4 -16l3 8h4\" />",
+"server-2": "<path d=\"M3 7a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v2a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3v-2\" /> <path d=\"M3 15a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v2a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3l0 -2\" /> <path d=\"M7 8l0 .01\" /> <path d=\"M7 16l0 .01\" /> <path d=\"M11 8h6\" /> <path d=\"M11 16h6\" />",
+"map-2": "<path d=\"M12 18.5l-3 -1.5l-6 3v-13l6 -3l6 3l6 -3v7.5\" /> <path d=\"M9 4v13\" /> <path d=\"M15 7v5.5\" /> <path d=\"M21.121 20.121a3 3 0 1 0 -4.242 0c.418 .419 1.125 1.045 2.121 1.879c1.051 -.89 1.759 -1.516 2.121 -1.879\" /> <path d=\"M19 18v.01\" />",
+"key": "<path d=\"M16.555 3.843l3.602 3.602a2.877 2.877 0 0 1 0 4.069l-2.643 2.643a2.877 2.877 0 0 1 -4.069 0l-.301 -.301l-6.558 6.558a2 2 0 0 1 -1.239 .578l-.175 .008h-1.172a1 1 0 0 1 -.993 -.883l-.007 -.117v-1.172a2 2 0 0 1 .467 -1.284l.119 -.13l.414 -.414h2v-2h2v-2l2.144 -2.144l-.301 -.301a2.877 2.877 0 0 1 0 -4.069l2.643 -2.643a2.877 2.877 0 0 1 4.069 0\" /> <path d=\"M15 9h.01\" />",
+"file-zip": "<path d=\"M6 20.735a2 2 0 0 1 -1 -1.735v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2h-1\" /> <path d=\"M11 17a2 2 0 0 1 2 2v2a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1v-2a2 2 0 0 1 2 -2\" /> <path d=\"M11 5l-1 0\" /> <path d=\"M13 7l-1 0\" /> <path d=\"M11 9l-1 0\" /> <path d=\"M13 11l-1 0\" /> <path d=\"M11 13l-1 0\" /> <path d=\"M13 15l-1 0\" />",
+"wifi": "<path d=\"M12 18l.01 0\" /> <path d=\"M9.172 15.172a4 4 0 0 1 5.656 0\" /> <path d=\"M6.343 12.343a8 8 0 0 1 11.314 0\" /> <path d=\"M3.515 9.515c4.686 -4.687 12.284 -4.687 17 0\" />",
+"calendar": "<path d=\"M4 7a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-12\" /> <path d=\"M16 3v4\" /> <path d=\"M8 3v4\" /> <path d=\"M4 11h16\" /> <path d=\"M11 15h1\" /> <path d=\"M12 15v3\" />",
+"clock": "<path d=\"M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0\" /> <path d=\"M12 7v5l3 3\" />",
+"cloud": "<path d=\"M6.657 18c-2.572 0 -4.657 -2.007 -4.657 -4.483c0 -2.475 2.085 -4.482 4.657 -4.482c.393 -1.762 1.794 -3.2 3.675 -3.773c1.88 -.572 3.956 -.193 5.444 1c1.488 1.19 2.162 3.007 1.77 4.769h.99c1.913 0 3.464 1.56 3.464 3.486c0 1.927 -1.551 3.487 -3.465 3.487h-11.878\" />",
+"apps": "<path d=\"M4 5a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1l0 -4\" /> <path d=\"M4 15a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1l0 -4\" /> <path d=\"M14 15a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1l0 -4\" /> <path d=\"M14 7l6 0\" /> <path d=\"M17 4l0 6\" />",
+"printer": "<path d=\"M17 17h2a2 2 0 0 0 2 -2v-4a2 2 0 0 0 -2 -2h-14a2 2 0 0 0 -2 2v4a2 2 0 0 0 2 2h2\" /> <path d=\"M17 9v-4a2 2 0 0 0 -2 -2h-6a2 2 0 0 0 -2 2v4\" /> <path d=\"M7 15a2 2 0 0 1 2 -2h6a2 2 0 0 1 2 2v4a2 2 0 0 1 -2 2h-6a2 2 0 0 1 -2 -2l0 -4\" />",
+"box": "<path d=\"M12 3l8 4.5l0 9l-8 4.5l-8 -4.5l0 -9l8 -4.5\" /> <path d=\"M12 12l8 -4.5\" /> <path d=\"M12 12l0 9\" /> <path d=\"M12 12l-8 -4.5\" />",
+"database": "<path d=\"M4 6a8 3 0 1 0 16 0a8 3 0 1 0 -16 0\" /> <path d=\"M4 6v6a8 3 0 0 0 16 0v-6\" /> <path d=\"M4 12v6a8 3 0 0 0 16 0v-6\" />",
+"bug": "<path d=\"M9 9v-1a3 3 0 0 1 6 0v1\" /> <path d=\"M8 9h8a6 6 0 0 1 1 3v3a5 5 0 0 1 -10 0v-3a6 6 0 0 1 1 -3\" /> <path d=\"M3 13l4 0\" /> <path d=\"M17 13l4 0\" /> <path d=\"M12 20l0 -6\" /> <path d=\"M4 19l3.35 -2\" /> <path d=\"M20 19l-3.35 -2\" /> <path d=\"M4 7l3.75 2.4\" /> <path d=\"M20 7l-3.75 2.4\" />",
+"app-window": "<path d=\"M3 7a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v10a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-10\" /> <path d=\"M6 8h.01\" /> <path d=\"M9 8h.01\" />"
+}
+
+# (regex tested against  iconname + name + categories , glyph, pink?)
+RULES = [
+ (r"steam|lutris|heroic|emulat|retroarch|minecraft|gamepad|playstation|xbox|proton|\bgame", "device-gamepad-2", True),
+ (r"discord|telegram|signal|slack|matrix|element|whatsapp|messeng|\bchat\b|\birc\b|rocketchat", "message-circle", True),
+ (r"chromium|firefox|chrome|brave|helium|vivaldi|opera|epiphany|browser|\bweb\b", "world", True),
+ (r"spotify|rhythmbox|clementine|lollypop|deezer|tidal|headphone|\bmusic\b|\baudio\b", "music", True),
+ (r"\bmpv\b|\bvlc\b|kodi|stremio|plex|jellyfin|netflix|youtube|totem|movie|video|\bplayer\b", "movie", True),
+ (r"gimp|krita|inkscape|blender|aseprite|\bpaint\b|\bdraw\b|pixel", "brush", True),
+ (r"shotwell|gthumb|\bphoto\b|\bimage\b|picture|\bviewer\b|loupe|\beog\b", "photo", True),
+ (r"\bobs\b|record|stream|webcam|camera|cheese|kamoso", "camera", True),
+ (r"torrent|transmission|qbittorrent|deluge|fragments|\bdownload\b", "download", True),
+ (r"terminal|console|\bkgx\b|tilix|alacritty|kitty|wezterm|ptyxis|\bshell\b|\btty\b", "terminal-2", False),
+ (r"vscode|vscodium|\bvim\b|neovim|emacs|sublime|jetbrains|pycharm|\bidea\b|builder|\bide\b|\bcode\b|\bdevel\b", "code", False),
+ (r"gedit|writer|\bnotes\b|typora|obsidian|markdown|text|document", "file-text", False),
+ (r"calculator|\bcalc\b", "calculator", False),
+ (r"gnumeric|spreadsheet|\bsheet\b|excel|\btable\b", "table", False),
+ (r"impress|presentation|\bslides\b|powerpoint", "presentation", False),
+ (r"evince|papers|okular|xreader|\breader\b|calibre|foliate|\bpdf\b|\bbook\b|ebook", "book", False),
+ (r"thunderbird|geary|evolution|kmail|\bmail\b|email", "mail", False),
+ (r"nautilus|nemo|thunar|dolphin|pcmanfm|\bfiles?\b|explorer|\bmanager\b", "folder", False),
+ (r"system-monitor|\bhtop\b|\bbtop\b|mission-center|\busage\b|resources|\bstats\b|\btask\b", "activity", False),
+ (r"gparted|gnome-disks|baobab|filelight|\bdisk\b|\bdrive\b|partition", "server-2", False),
+ (r"gnome-maps|navigation|\bgps\b|\bmaps?\b", "map-2", False),
+ (r"keyring|seahorse|bitwarden|keepass|\bpassword\b|\bsecret\b|\bvault\b|authent", "key", False),
+ (r"file-roller|xarchiver|\bark\b|archive|\bzip\b|compress", "file-zip", False),
+ (r"wireguard|openvpn|\bvpn\b|\bwifi\b|network|\bnm-", "wifi", False),
+ (r"calendar|\bdate\b", "calendar", False),
+ (r"\bclock\b|\balarm\b|stopwatch|\btime\b", "clock", False),
+ (r"weather", "cloud", False),
+ (r"software|appstore|discover|pamac|octopi|warehouse|\bstore\b|market", "apps", False),
+ (r"\bcups\b|printer|\bprint\b|\bscan\b", "printer", False),
+ (r"virtualbox|vmware|\bqemu\b|\bboxes\b|\bvirt", "box", False),
+ (r"dbeaver|postgres|mysql|\bsql\b|database", "database", False),
+ (r"\bbug\b|debug", "bug", False),
+ (r"settings|preferences|control-center|\btweak\b|\bdconf\b|\bconfig\b", "settings", False),
+]
+
+NAME_RE = re.compile(r"^[A-Za-z0-9._+-]+$")
+
+def compose(glyph, pink):
+    color = PINK if pink else TEAL
+    inner = GLYPHS.get(glyph, GLYPHS["app-window"])
+    return (
+'<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">'
++ AUTO_MARK +
+'<rect x="14" y="14" width="228" height="228" rx="58" fill="%s" stroke="%s" stroke-width="2"/>'
+'<g transform="translate(64,64) scale(5.3333)" fill="none" stroke="%s" stroke-width="1.6" '
+'stroke-linecap="round" stroke-linejoin="round">%s</g></svg>\n'
+) % (TILE_FILL, TILE_BORDER, color, inner)
+
+def pick(primary, secondary):
+    # Match the app's own icon-name + Name first; fall back to Categories.
+    # This stops generic category words (e.g. "AudioVideo") from outranking
+    # a more specific match on the application's actual name.
+    for hay in (primary, secondary):
+        for rx, glyph, pink in RULES:
+            if re.search(rx, hay):
+                return glyph, pink
+    return "app-window", False
+
+def read_desktops():
+    seen = {}
+    for d in DESKTOP_DIRS:
+        for path in glob.glob(os.path.join(d, "*.desktop")):
+            try:
+                icon = name = cats = ""
+                with open(path, encoding="utf-8", errors="ignore") as fh:
+                    in_entry = False
+                    for line in fh:
+                        s = line.strip()
+                        if s.startswith("["):
+                            in_entry = (s == "[Desktop Entry]")
+                            continue
+                        if not in_entry:
+                            continue
+                        if s.startswith("Icon=") and not icon:
+                            icon = s[5:].strip()
+                        elif s.startswith("Name=") and not name:
+                            name = s[5:].strip()
+                        elif s.startswith("Categories=") and not cats:
+                            cats = s[11:].strip()
+                if icon and icon not in seen:
+                    seen[icon] = (name, cats)
+            except Exception:
+                pass
+    return seen
+
+def is_auto(path):
+    try:
+        with open(path, encoding="utf-8", errors="ignore") as fh:
+            return AUTO_MARK in fh.read(200)
+    except Exception:
+        return False
+
+def main():
+    args = sys.argv[1:]
+    quiet = "--quiet" in args
+    force = "--force" in args
+
+    if "--list-glyphs" in args:
+        print(" ".join(sorted(GLYPHS))); return
+    if "--help" in args or "-h" in args:
+        print(__doc__); return
+
+    os.makedirs(THEME_DIR, exist_ok=True)
+
+    if "--add" in args:
+        i = args.index("--add")
+        rest = [a for a in args[i+1:] if not a.startswith("-")]
+        if len(rest) < 2:
+            print("usage: niix-iconify --add NAME GLYPH [pink|teal]"); sys.exit(1)
+        nm, gl = rest[0], rest[1]
+        pink = len(rest) > 2 and rest[2].lower() == "pink"
+        if not NAME_RE.match(nm):
+            print("refused: unsafe icon name"); sys.exit(1)
+        if gl not in GLYPHS:
+            print("unknown glyph '%s' (see --list-glyphs)" % gl); sys.exit(1)
+        open(os.path.join(THEME_DIR, nm + ".svg"), "w").write(compose(gl, pink))
+        if not quiet: print("added %s -> %s" % (nm, gl))
+        update_cache(); return
+
+    desktops = read_desktops()
+    referenced = set()
+    added = 0
+    for icon, (name, cats) in desktops.items():
+        # skip absolute paths / names with slashes — those apps ship their own icon
+        if "/" in icon or icon.startswith(".") or not NAME_RE.match(icon):
+            continue
+        referenced.add(icon)
+        dest = os.path.join(THEME_DIR, icon + ".svg")
+        if os.path.exists(dest):
+            if not (force and is_auto(dest)):
+                continue  # keep curated + existing
+        glyph, pink = pick(" ".join((icon, name)).lower(), cats.lower())
+        try:
+            open(dest, "w").write(compose(glyph, pink))
+            added += 1
+            if not quiet:
+                print("  + %-40s %s%s" % (icon, glyph, " (pink)" if pink else ""))
+        except Exception as e:
+            if not quiet: print("  ! %s: %s" % (icon, e))
+
+    pruned = 0
+    if "--prune" in args:
+        for f in glob.glob(os.path.join(THEME_DIR, "*.svg")):
+            nm = os.path.basename(f)[:-4]
+            if nm not in referenced and is_auto(f):
+                os.remove(f); pruned += 1
+                if not quiet: print("  - %s (pruned)" % nm)
+
+    if added or pruned:
+        update_cache()
+    if not quiet:
+        print("niix-iconify: %d added, %d pruned (%d apps scanned)"
+              % (added, pruned, len(referenced)))
+
+def update_cache():
+    try:
+        subprocess.run(["gtk-update-icon-cache", "-f", "/usr/share/icons/NiiX"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    except Exception:
+        pass
+
+if __name__ == "__main__":
+    main()
+NIIX_ICONIFY_EOF
+    chmod +x /mnt/usr/local/bin/niix-iconify
+
+    # pacman hook — fires on any package that ships a .desktop launcher
+    mkdir -p /mnt/etc/pacman.d/hooks
+    cat > /mnt/etc/pacman.d/hooks/niix-iconify.hook <<'HOOKEOF'
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Path
+Target = usr/share/applications/*.desktop
+Target = usr/local/share/applications/*.desktop
+
+[Action]
+Description = Generating NiiX icons for new apps...
+When = PostTransaction
+Exec = /usr/local/bin/niix-iconify --quiet
+HOOKEOF
+
+    # systemd: run once at boot, and on flatpak/local-app changes
+    cat > /mnt/etc/systemd/system/niix-iconify.service <<'SVCEOF'
+[Unit]
+Description=Generate NiiX flat icons for installed apps
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/niix-iconify --quiet
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+
+    cat > /mnt/etc/systemd/system/niix-iconify.path <<'PATHEOF'
+[Unit]
+Description=Watch app directories for NiiX icon generation
+
+[Path]
+PathChanged=/var/lib/flatpak/exports/share/applications
+PathChanged=/usr/local/share/applications
+Unit=niix-iconify.service
+
+[Install]
+WantedBy=multi-user.target
+PATHEOF
+
+    arch-chroot /mnt systemctl enable niix-iconify.service niix-iconify.path 2>/dev/null || true
+    log "Auto-iconify installed (pacman hook + boot/flatpak watchers)"
+}
+
 # ── GNOME desktop + branding ─────────────────────────────────
 install_desktop() {
     hr "GNOME + Branding"
@@ -1410,6 +1840,7 @@ install_desktop() {
         gnome-terminal \
         gnome-tweaks \
         gnome-shell-extensions \
+        gnome-menus \
         gnome-disk-utility
 
     arch-chroot /mnt bash <<CHROOT
@@ -1443,6 +1874,18 @@ CHROOT
     sed -i 's/^NAME=.*/NAME="NiiX Arch"/' /mnt/etc/os-release
     sed -i 's/^PRETTY_NAME=.*/PRETTY_NAME="NiiX Arch"/' /mnt/etc/os-release
 
+    # NiiX logo (About page + ArcMenu start button) + os-release LOGO key
+    write_logo
+    # NiiX flat icon theme (overrides every installed app icon)
+    write_icons
+    # Auto-iconify for any app installed later
+    setup_auto_icons
+    if grep -q '^LOGO=' /mnt/etc/os-release; then
+        sed -i 's/^LOGO=.*/LOGO=niixarch-logo/' /mnt/etc/os-release
+    else
+        echo 'LOGO=niixarch-logo' >> /mnt/etc/os-release
+    fi
+
     # /etc/issue
     echo "NiiX Arch \r (\l)" > /mnt/etc/issue
 
@@ -1468,7 +1911,7 @@ Target = filesystem
 [Action]
 Description = Re-applying NiiX Arch branding...
 When = PostTransaction
-Exec = /bin/bash -c "sed -i 's/^NAME=.*/NAME=\"NiiX Arch\"/' /etc/os-release; sed -i 's/^PRETTY_NAME=.*/PRETTY_NAME=\"NiiX Arch\"/' /etc/os-release"
+Exec = /bin/bash -c "sed -i 's/^NAME=.*/NAME=\"NiiX Arch\"/' /etc/os-release; sed -i 's/^PRETTY_NAME=.*/PRETTY_NAME=\"NiiX Arch\"/' /etc/os-release; grep -q '^LOGO=' /etc/os-release && sed -i 's/^LOGO=.*/LOGO=niixarch-logo/' /etc/os-release || echo 'LOGO=niixarch-logo' >> /etc/os-release"
 HOOKEOF
 
     # Shell performance vars (for all users)
@@ -1692,7 +2135,7 @@ CONFEOF
 
     # Write the first-boot script
     cat > /mnt/usr/local/bin/niixarch-firstboot.sh <<'FBEOF'
-# !/bin/bash
+#!/bin/bash
 # NiiX Arch First-Boot — CachyOS kernel, AUR packages, GNOME settings
 # Run via autostart, or manually: bash /usr/local/bin/niixarch-firstboot.sh
 set +e
@@ -1719,17 +2162,22 @@ exec > >(tee -a "$LOG") 2>&1
 info "Applying GNOME settings..."
 gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark' 2>/dev/null || true
 gsettings set org.gnome.desktop.interface gtk-theme 'Adwaita-dark' 2>/dev/null || true
-gsettings set org.gnome.desktop.interface enable-animations false 2>/dev/null || true
+gsettings set org.gnome.desktop.interface icon-theme 'NiiX' 2>/dev/null || true
+# AnduinOS-style desktop: animations on, standard dynamic workspaces.
+gsettings set org.gnome.desktop.interface enable-animations true 2>/dev/null || true
 gsettings set org.gnome.desktop.sound event-sounds false 2>/dev/null || true
 gsettings set org.gnome.desktop.session idle-delay 0 2>/dev/null || true
-gsettings set org.gnome.settings-daemon.plugins.power power-button-action 'poweroff' 2>/dev/null || true
+gsettings set org.gnome.settings-daemon.plugins.power power-button-action 'interactive' 2>/dev/null || true
 gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing' 2>/dev/null || true
-gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-type 'nothing' 2>/dev/null || true
-gsettings set org.gnome.mutter dynamic-workspaces false 2>/dev/null || true
-gsettings set org.gnome.desktop.wm.preferences num-workspaces 1 2>/dev/null || true
+gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-type 'suspend' 2>/dev/null || true
+gsettings set org.gnome.mutter dynamic-workspaces true 2>/dev/null || true
+gsettings set org.gnome.mutter edge-tiling true 2>/dev/null || true
 gsettings set org.gnome.desktop.notifications show-in-lock-screen false 2>/dev/null || true
+# Pink accent (NiiX) instead of AnduinOS blue — as requested.
 gsettings set org.gnome.desktop.interface accent-color 'pink' 2>/dev/null || true
 gsettings set org.gnome.desktop.interface show-battery-percentage true 2>/dev/null || true
+gsettings set org.gnome.desktop.interface clock-show-weekday true 2>/dev/null || true
+# Windows-style titlebar buttons (min/max/close) — matches dash-to-panel look.
 gsettings set org.gnome.desktop.wm.preferences button-layout 'appmenu:minimize,maximize,close' 2>/dev/null || true
 
 # Ctrl+Alt+T terminal shortcut
@@ -1738,10 +2186,9 @@ gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/or
 gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ command "gnome-terminal" 2>/dev/null || true
 gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ binding "<Control><Alt>t" 2>/dev/null || true
 
-# Enable AppIndicator (tray icons)
+# Enable AppIndicator (tray icons). The AnduinOS-style panel/menu/desktop-icon/
+# auto-rotate extensions are installed + enabled in PHASE 3 (need internet).
 gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com 2>/dev/null || true
-gnome-extensions enable apps-menu@gnome-shell-extensions.gcampax.github.com 2>/dev/null || true
-gnome-extensions enable status-icons@gnome-shell-extensions.gcampax.github.com 2>/dev/null || true
 log "GNOME settings applied"
 
 # ── Bluetooth — ensure service is running ────────────────
@@ -1824,7 +2271,7 @@ echo -e "${GREEN}  ╚═╝  ╚═══╝╚═╝╚═╝╚═╝  ╚═
 echo
 echo -e "  ${WHITE}${BOLD}First-Boot Setup${NC}"
 echo -e "  ${PINK}────────────────────────────────────────────────${NC}"
-echo -e "  ${CYAN}·${NC}  CachyOS kernel · AUR packages · GE-Proton · wallpaper"
+echo -e "  ${CYAN}·${NC}  CachyOS kernel · AUR packages · GE-Proton · AnduinOS desktop · wallpaper"
 echo
 
 # ── Wait for network ──────────────────────────────────────
@@ -1868,6 +2315,115 @@ if [ -f "$HOME/Pictures/niix-background.png" ]; then
     gsettings set org.gnome.desktop.background picture-options 'zoom' 2>/dev/null || true
     log "Wallpaper set"
 fi
+
+# ── AnduinOS-style desktop ────────────────────────────────
+# dash-to-panel (bottom taskbar) + ArcMenu (start menu, NiiX logo button) +
+# Screen Autorotate (360° laptops). Extensions are pulled
+# from extensions.gnome.org at the version matching the running GNOME Shell,
+# so this stays correct as GNOME updates.
+info "Installing AnduinOS-style GNOME extensions..."
+SHELL_VER=$(gnome-shell --version 2>/dev/null | grep -oE '[0-9]+' | head -1)
+EXT_DIR="$HOME/.local/share/gnome-shell/extensions"
+mkdir -p "$EXT_DIR"
+
+ego_install() {
+    # $1 = extension UUID; installs the version compatible with $SHELL_VER
+    local uuid="$1" meta url
+    meta=$(curl -sf "https://extensions.gnome.org/extension-info/?uuid=${uuid}&shell_version=${SHELL_VER}" 2>/dev/null) || return 1
+    url=$(printf '%s' "$meta" | python3 -c 'import sys,json
+try:
+    print(json.load(sys.stdin).get("download_url","") or "")
+except Exception:
+    print("")' 2>/dev/null)
+    [ -n "$url" ] || return 1
+    curl -sfL -o "/tmp/${uuid}.zip" "https://extensions.gnome.org${url}" 2>/dev/null || return 1
+    gnome-extensions install --force "/tmp/${uuid}.zip" 2>/dev/null
+    local rc=$?
+    rm -f "/tmp/${uuid}.zip"
+    return $rc
+}
+
+for ext in \
+    dash-to-panel@jderose9.github.com \
+    arcmenu@arcmenu.com \
+    screen-rotate@shyzus.github.io
+do
+    if ego_install "$ext"; then
+        log "Extension installed: $ext"
+    else
+        warn "Could not fetch $ext from extensions.gnome.org"
+    fi
+done
+
+# Guaranteed source fallback for the 360° auto-rotate extension (requested).
+if [ ! -d "$EXT_DIR/screen-rotate@shyzus.github.io" ]; then
+    info "Installing screen-rotate from source (fallback)..."
+    rm -rf /tmp/screen-autorotate
+    if git clone --depth 1 \
+        https://github.com/shyzus/gnome-shell-extension-screen-autorotate.git \
+        /tmp/screen-autorotate 2>/dev/null; then
+        cp -r /tmp/screen-autorotate/screen-rotate@shyzus.github.io "$EXT_DIR/" 2>/dev/null
+        [ -d "$EXT_DIR/screen-rotate@shyzus.github.io/schemas" ] && \
+            glib-compile-schemas "$EXT_DIR/screen-rotate@shyzus.github.io/schemas" 2>/dev/null || true
+        rm -rf /tmp/screen-autorotate
+        log "screen-rotate installed from source"
+    fi
+fi
+
+# ── Configure the AnduinOS look via dconf ─────────────────
+info "Configuring AnduinOS-style panel + start menu..."
+
+# Dash to Panel — bottom Windows-style taskbar
+dconf load /org/gnome/shell/extensions/dash-to-panel/ <<'DTP'
+[/]
+panel-positions='{"0":"BOTTOM"}'
+panel-sizes='{"0":44}'
+panel-lengths='{"0":100}'
+panel-anchors='{"0":"MIDDLE"}'
+panel-element-positions='{"0":[{"element":"showAppsButton","visible":false,"position":"stackedTL"},{"element":"activitiesButton","visible":false,"position":"stackedTL"},{"element":"leftBox","visible":true,"position":"stackedTL"},{"element":"taskbar","visible":true,"position":"stackedTL"},{"element":"centerBox","visible":true,"position":"stackedBR"},{"element":"rightBox","visible":true,"position":"stackedBR"},{"element":"dateMenu","visible":true,"position":"stackedBR"},{"element":"systemMenu","visible":true,"position":"stackedBR"},{"element":"desktopButton","visible":true,"position":"stackedBR"}]}'
+dot-position='BOTTOM'
+show-appmenu=false
+group-apps=true
+isolate-workspaces=false
+appicon-margin=4
+appicon-padding=4
+animate-appicon-hover=false
+show-showdesktop-button=true
+trans-use-custom-opacity=true
+trans-panel-opacity=0.9
+DTP
+
+# ArcMenu — Windows-style start menu with the NiiX logo as the button
+dconf load /org/gnome/shell/extensions/arcmenu/ <<'ARCM'
+[/]
+menu-layout='Redmond'
+position-in-panel='Left'
+menu-button-icon='Custom_Icon'
+custom-menu-button-icon='/usr/share/pixmaps/niixarch-logo.png'
+custom-menu-button-icon-size=28.0
+menu-button-position-offset=0
+multi-monitor=false
+enable-menu-hotkey=true
+menu-hotkey='Super_L'
+ARCM
+
+# Screen Autorotate — sane defaults for 360° convertibles
+dconf load /org/gnome/shell/extensions/screen-rotate/ <<'ROT'
+[/]
+flip-orientation=false
+hide-lock-rotate=false
+debug-logging=false
+ROT
+
+# Enable every extension + pin apps (Lutris included) for the next login
+dconf load /org/gnome/shell/ <<'SHELLD'
+[/]
+disable-user-extensions=false
+enabled-extensions=['appindicatorsupport@rgcjonas.gmail.com', 'dash-to-panel@jderose9.github.com', 'arcmenu@arcmenu.com', 'screen-rotate@shyzus.github.io']
+favorite-apps=['org.gnome.Nautilus.desktop', 'org.gnome.Terminal.desktop', 'helium.desktop', 'net.lutris.Lutris.desktop', 'steam.desktop', 'heroic.desktop', 'com.stremio.Stremio.desktop']
+SHELLD
+
+log "AnduinOS-style desktop configured (fully applies after the reboot below)"
 
 # ── CachyOS kernel ────────────────────────────────────────
 if ! pacman -Q linux-cachyos &>/dev/null; then
@@ -1998,7 +2554,7 @@ rmdir "$TMP_MNT" 2>/dev/null || true
 
 # ── niixarch-refresh-clean helper ────────────────────────
 sudo tee /usr/local/bin/niixarch-refresh-clean > /dev/null <<'REFRESHEOF'
-# !/bin/bash
+#!/bin/bash
 echo "Refreshing @clean snapshot to current system state..."
 MAPPER_DEV=$(findmnt -n -o SOURCE / | head -1)
 TMP_MNT=$(mktemp -d)
@@ -2067,6 +2623,11 @@ else
     warn "Could not fetch GE-Proton — install via ProtonUp-Qt later"
 fi
 
+# ── NiiX icons for AUR/flatpak apps just installed ───────
+info "Generating NiiX icons for newly installed apps..."
+sudo /usr/local/bin/niix-iconify --quiet 2>/dev/null || true
+log "App icons reconciled"
+
 # ── Pin apps to GNOME Dash ──────────────────────────────
 # Desktop IDs confirmed from live system ls /usr/share/applications/:
 #   helium.desktop              (helium-browser-bin AUR)
@@ -2082,10 +2643,17 @@ if ! grep -q "system-db:local" /etc/dconf/profile/user 2>/dev/null; then
 fi
 sudo tee /etc/dconf/db/local.d/00-niixarch-dash > /dev/null << 'DCONFEOF'
 [org/gnome/shell]
-favorite-apps=['org.gnome.Nautilus.desktop', 'org.gnome.Terminal.desktop', 'helium.desktop', 'com.stremio.Stremio.desktop', 'steam.desktop', 'heroic.desktop']
+favorite-apps=['org.gnome.Nautilus.desktop', 'org.gnome.Terminal.desktop', 'helium.desktop', 'net.lutris.Lutris.desktop', 'steam.desktop', 'heroic.desktop', 'com.stremio.Stremio.desktop']
+disable-user-extensions=false
+enabled-extensions=['appindicatorsupport@rgcjonas.gmail.com', 'dash-to-panel@jderose9.github.com', 'arcmenu@arcmenu.com', 'screen-rotate@shyzus.github.io']
+
+[org/gnome/desktop/interface]
+color-scheme='prefer-dark'
+accent-color='pink'
+icon-theme='NiiX'
 DCONFEOF
 sudo dconf update 2>/dev/null \
-    && log "Dash pinned: Nautilus · Terminal · Helium · Stremio · Steam · Heroic" \
+    && log "Dash pinned: Nautilus · Terminal · Helium · Lutris · Steam · Heroic · Stremio" \
     || warn "dconf update failed — Dash pinning may not apply"
 
 # ── Cleanup ───────────────────────────────────────────────
@@ -2097,6 +2665,7 @@ echo ""
 echo -e "  ${GREEN}✓${NC}  ${WHITE}${BOLD}First-boot setup complete!${NC}"
 echo -e "  ${PINK}────────────────────────────────────────────────${NC}"
 echo -e "  ${CYAN}·${NC}  Steam launch options: ${GREEN}gamemoderun mangohud %command%${NC}"
+echo -e "  ${CYAN}·${NC}  Phone-friendly Wi-Fi hotspot: ${GREEN}niix-hotspot start${NC}"
 echo -e "  ${CYAN}·${NC}  Refresh clean snapshot: ${GREEN}sudo niixarch-refresh-clean${NC}"
 echo -e "  ${CYAN}·${NC}  Log saved to: $LOG"
 echo ""
@@ -2116,7 +2685,7 @@ FBEOF
     # A separate script handles terminal detection and the done-file guard.
     # This avoids shell quoting issues inside the .desktop Exec field.
     cat > /mnt/usr/local/bin/niixarch-firstboot-launcher.sh <<'LAUNCHEOF'
-# !/bin/bash
+#!/bin/bash
 # Exit silently if first-boot already completed
 [ -f /var/lib/niixarch-firstboot-done ] && exit 0
 
