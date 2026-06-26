@@ -2,8 +2,8 @@
 # ============================================================
 #  NiiX Arch Installer  //  arch.niiix.net
 #  Modes   : Dual-boot (Arch + Windows)  |  Single-boot (bare drive)
-#  Stack   : LUKS2 · Btrfs · Limine · CachyOS · GNOME 
-#  Desktop : dash-to-panel + ArcMenu + auto-rotate 
+#  Stack   : LUKS2 · Btrfs · Limine · CachyOS · GNOME (customised)
+#  Desktop : dash-to-panel + ArcMenu + auto-rotate (clean desktop, no icons)
 #  Extras  : Auto GPU drivers · Gaming (Steam/Lutris/Heroic) · Wi-Fi hotspot
 #
 #  Requirements:
@@ -55,7 +55,7 @@ NIIX_LOGO_B64="iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAAxX0lEQVR4nO2deZQkV
 # ── Embedded NiiX icon theme (Tabler-glyph squircles, base64 .tar.gz) ─
 # Flat dark icons matching the desktop preview; teal + pink accents.
 # Extracted to /usr/share/icons/NiiX by write_icons() during install.
-NIIX_ICONS_B64="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"
+NIIX_ICONS_B64="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"
 
 # ── Hardcoded preferences ────────────────────────────────────
 KEYMAP="us"        # console keymap  (loadkeys / vconsole.conf) — set by gather_input
@@ -996,10 +996,23 @@ AMDENV
             log "AMD GPU drivers installed"
             ;;
         nvidia)
+            # Driver choice by GPU generation:
+            #   • Turing (GTX 16xx / RTX 20xx) and newer → open kernel modules (NVIDIA's
+            #     recommended driver for these cards).
+            #   • Maxwell / Pascal / Volta (GTX 9xx/10xx, Titan X/V) → proprietary nvidia-dkms.
+            #   • Kepler/Fermi and older are NOT supported by the mainline driver and need a
+            #     legacy AUR branch — we warn rather than guess.
             local nvidia_pkg="nvidia-dkms"
-            # Use open driver for Turing+ (RTX 20xx, GTX 16xx, RTX 30xx+)
-            if echo "$GPU_MODEL" | grep -qiE "RTX [2-9]0|RTX [0-9]{4}|GTX 16"; then
+            if echo "$GPU_MODEL" | grep -qiE "RTX [0-9]|GTX 16[0-9]{2}|RTX A[0-9]|MX5[0-9]{2}|Ada|Ampere|Hopper|Blackwell"; then
                 nvidia_pkg="nvidia-open-dkms"
+                log "NVIDIA Turing+ detected → open kernel modules (nvidia-open-dkms)"
+            else
+                log "NVIDIA Maxwell/Pascal/Volta (or unknown) → proprietary driver (nvidia-dkms)"
+            fi
+            if echo "$GPU_MODEL" | grep -qiE "GTX [67][0-9]{2}|GT [67][0-9]{2}|GeForce [4-8][0-9]{2}M?\b|Kepler|Fermi"; then
+                warn "Old NVIDIA GPU ($GPU_MODEL) — mainline driver may not support it."
+                warn "If graphics fail after first boot, install a legacy driver from the AUR:"
+                warn "  Kepler → nvidia-470xx-dkms   |   Fermi → nvidia-390xx-dkms"
             fi
             arch-chroot /mnt pacman -S --noconfirm --needed \
                 "$nvidia_pkg" nvidia-utils lib32-nvidia-utils \
@@ -1047,6 +1060,7 @@ install_packages() {
         linux-headers \
         gamemode lib32-gamemode mangohud lib32-mangohud \
         gamescope \
+        yakuake \
         wine winetricks \
         vkd3d lib32-vkd3d \
         ananicy-cpp \
@@ -1880,6 +1894,84 @@ CHROOT
     write_icons
     # Auto-iconify for any app installed later
     setup_auto_icons
+
+    # ── Yakuake drop-down terminal: toggle wrapper + autostart ───
+    cat > /mnt/usr/local/bin/niix-yakuake-toggle <<'YKEOF'
+#!/bin/bash
+# Toggle the Yakuake drop-down terminal; launch it first if not running.
+if pgrep -x yakuake >/dev/null 2>&1; then
+    dbus-send --session --type=method_call --dest=org.kde.yakuake \
+        /yakuake/window org.kde.yakuake.toggleWindow >/dev/null 2>&1
+else
+    setsid yakuake >/dev/null 2>&1 &
+    for _ in $(seq 1 30); do
+        dbus-send --session --dest=org.kde.yakuake --print-reply /yakuake/window \
+            org.freedesktop.DBus.Introspectable.Introspect >/dev/null 2>&1 && break
+        sleep 0.1
+    done
+fi
+YKEOF
+    chmod +x /mnt/usr/local/bin/niix-yakuake-toggle
+
+    # Autostart Yakuake at login (starts retracted/hidden)
+    mkdir -p /mnt/etc/xdg/autostart
+    cat > /mnt/etc/xdg/autostart/niix-yakuake.desktop <<'YKAUTO'
+[Desktop Entry]
+Type=Application
+Name=Yakuake
+Comment=Drop-down terminal
+Exec=yakuake
+Icon=yakuake
+Terminal=false
+X-GNOME-Autostart-enabled=true
+NoDisplay=true
+YKAUTO
+    log "Yakuake drop-down terminal configured (Ctrl+Alt+T)"
+
+    # ── Hide-app helpers: tidy the menu without uninstalling ─────
+    # Many apps are pulled in as GNOME dependencies and can't be removed, but you
+    # can hide them from the menu with a per-user NoDisplay override (reversible).
+    cat > /mnt/usr/local/bin/niix-hide-app <<'HIDEEOF'
+#!/bin/bash
+# Hide one or more apps from the menu (does NOT uninstall). Reverse: niix-unhide-app
+#   niix-hide-app org.gnome.Tour gnome-system-monitor ...
+set -uo pipefail
+A="$HOME/.local/share/applications"; mkdir -p "$A"
+[ $# -ge 1 ] || { echo "usage: niix-hide-app <desktop-id> [more...]"; exit 1; }
+for id in "$@"; do
+    id="${id%.desktop}"; src=""
+    for d in /usr/share/applications /usr/local/share/applications \
+             /var/lib/flatpak/exports/share/applications \
+             "$HOME/.local/share/flatpak/exports/share/applications"; do
+        [ -f "$d/$id.desktop" ] && { src="$d/$id.desktop"; break; }
+    done
+    if [ -n "$src" ]; then
+        cp -f "$src" "$A/$id.desktop"
+        if grep -q '^NoDisplay=' "$A/$id.desktop"; then
+            sed -i 's/^NoDisplay=.*/NoDisplay=true/' "$A/$id.desktop"
+        else
+            sed -i '/^\[Desktop Entry\]/a NoDisplay=true' "$A/$id.desktop"
+        fi
+    else
+        printf '[Desktop Entry]\nType=Application\nName=%s\nNoDisplay=true\nHidden=true\n' "$id" > "$A/$id.desktop"
+    fi
+    echo "hidden: $id"
+done
+update-desktop-database "$A" 2>/dev/null || true
+HIDEEOF
+    chmod +x /mnt/usr/local/bin/niix-hide-app
+
+    cat > /mnt/usr/local/bin/niix-unhide-app <<'UNHIDEEOF'
+#!/bin/bash
+# Un-hide apps previously hidden with niix-hide-app
+set -uo pipefail
+A="$HOME/.local/share/applications"
+[ $# -ge 1 ] || { echo "usage: niix-unhide-app <desktop-id> [more...]"; exit 1; }
+for id in "$@"; do id="${id%.desktop}"; rm -f "$A/$id.desktop" && echo "shown: $id"; done
+update-desktop-database "$A" 2>/dev/null || true
+UNHIDEEOF
+    chmod +x /mnt/usr/local/bin/niix-unhide-app
+    log "Menu hide/unhide helpers installed (niix-hide-app / niix-unhide-app)"
     if grep -q '^LOGO=' /mnt/etc/os-release; then
         sed -i 's/^LOGO=.*/LOGO=niixarch-logo/' /mnt/etc/os-release
     else
@@ -2150,6 +2242,24 @@ log()  { echo -e "  ${GREEN}✓${NC}  $*"; }
 warn() { echo -e "  ${YELLOW}⚠${NC}  $*"; }
 info() { echo -e "  ${CYAN}·${NC}  $*"; }
 
+# Retry pacman for transient mirror/CDN errors (e.g. CachyOS 404s). Refreshes the
+# package databases between attempts; pacman is transactional, so a failed attempt
+# installs nothing and a retry starts clean.
+pac_retry() {
+    local n=1
+    until sudo pacman "$@"; do
+        if [ "$n" -ge 3 ]; then
+            warn "pacman failed after $n attempts: $*"
+            return 1
+        fi
+        warn "Mirror error — refreshing databases and retrying ($n/3)..."
+        sudo pacman -Syy --noconfirm 2>/dev/null || true
+        sleep 3
+        n=$((n + 1))
+    done
+    return 0
+}
+
 LOG="$HOME/niixarch-firstboot-$(date +%Y%m%d-%H%M%S).log"
 exec > >(tee -a "$LOG") 2>&1
 
@@ -2163,9 +2273,11 @@ info "Applying GNOME settings..."
 gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark' 2>/dev/null || true
 gsettings set org.gnome.desktop.interface gtk-theme 'Adwaita-dark' 2>/dev/null || true
 gsettings set org.gnome.desktop.interface icon-theme 'NiiX' 2>/dev/null || true
-# AnduinOS-style desktop: animations on, standard dynamic workspaces.
+# Desktop: animations on, standard dynamic workspaces.
 gsettings set org.gnome.desktop.interface enable-animations true 2>/dev/null || true
 gsettings set org.gnome.desktop.sound event-sounds false 2>/dev/null || true
+# Disable GNOME's donation-reminder popup
+gsettings set org.gnome.settings-daemon.plugins.housekeeping donation-reminder-enabled false 2>/dev/null || true
 gsettings set org.gnome.desktop.session idle-delay 0 2>/dev/null || true
 gsettings set org.gnome.settings-daemon.plugins.power power-button-action 'interactive' 2>/dev/null || true
 gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing' 2>/dev/null || true
@@ -2173,21 +2285,24 @@ gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-typ
 gsettings set org.gnome.mutter dynamic-workspaces true 2>/dev/null || true
 gsettings set org.gnome.mutter edge-tiling true 2>/dev/null || true
 gsettings set org.gnome.desktop.notifications show-in-lock-screen false 2>/dev/null || true
-# Pink accent (NiiX) instead of AnduinOS blue — as requested.
+# Pink accent (NiiX).
 gsettings set org.gnome.desktop.interface accent-color 'pink' 2>/dev/null || true
 gsettings set org.gnome.desktop.interface show-battery-percentage true 2>/dev/null || true
 gsettings set org.gnome.desktop.interface clock-show-weekday true 2>/dev/null || true
 # Windows-style titlebar buttons (min/max/close) — matches dash-to-panel look.
 gsettings set org.gnome.desktop.wm.preferences button-layout 'appmenu:minimize,maximize,close' 2>/dev/null || true
 
-# Ctrl+Alt+T terminal shortcut
+# Ctrl+Alt+T → Yakuake drop-down terminal
 gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/']" 2>/dev/null || true
-gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ name "Terminal" 2>/dev/null || true
-gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ command "gnome-terminal" 2>/dev/null || true
+gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ name "Yakuake" 2>/dev/null || true
+gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ command "/usr/local/bin/niix-yakuake-toggle" 2>/dev/null || true
 gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ binding "<Control><Alt>t" 2>/dev/null || true
+# Make Yakuake the default terminal (best effort — GNOME's key may be absent)
+gsettings set org.gnome.desktop.default-applications.terminal exec 'yakuake' 2>/dev/null || true
+gsettings set org.gnome.desktop.default-applications.terminal exec-arg '' 2>/dev/null || true
 
-# Enable AppIndicator (tray icons). The AnduinOS-style panel/menu/desktop-icon/
-# auto-rotate extensions are installed + enabled in PHASE 3 (need internet).
+# Enable AppIndicator (tray icons). The panel, start menu, and auto-rotate
+# extensions are installed + enabled in PHASE 3 (need internet).
 gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com 2>/dev/null || true
 log "GNOME settings applied"
 
@@ -2271,7 +2386,7 @@ echo -e "${GREEN}  ╚═╝  ╚═══╝╚═╝╚═╝╚═╝  ╚═
 echo
 echo -e "  ${WHITE}${BOLD}First-Boot Setup${NC}"
 echo -e "  ${PINK}────────────────────────────────────────────────${NC}"
-echo -e "  ${CYAN}·${NC}  CachyOS kernel · AUR packages · GE-Proton · AnduinOS desktop · wallpaper"
+echo -e "  ${CYAN}·${NC}  CachyOS kernel · AUR packages · GE-Proton · NiiX desktop · wallpaper"
 echo
 
 # ── Wait for network ──────────────────────────────────────
@@ -2316,12 +2431,12 @@ if [ -f "$HOME/Pictures/niix-background.png" ]; then
     log "Wallpaper set"
 fi
 
-# ── AnduinOS-style desktop ────────────────────────────────
+# ── NiiX desktop (panel + start menu + flat icons) ───────
 # dash-to-panel (bottom taskbar) + ArcMenu (start menu, NiiX logo button) +
 # Screen Autorotate (360° laptops). Extensions are pulled
 # from extensions.gnome.org at the version matching the running GNOME Shell,
 # so this stays correct as GNOME updates.
-info "Installing AnduinOS-style GNOME extensions..."
+info "Installing NiiX desktop extensions..."
 SHELL_VER=$(gnome-shell --version 2>/dev/null | grep -oE '[0-9]+' | head -1)
 EXT_DIR="$HOME/.local/share/gnome-shell/extensions"
 mkdir -p "$EXT_DIR"
@@ -2370,8 +2485,8 @@ if [ ! -d "$EXT_DIR/screen-rotate@shyzus.github.io" ]; then
     fi
 fi
 
-# ── Configure the AnduinOS look via dconf ─────────────────
-info "Configuring AnduinOS-style panel + start menu..."
+# ── Configure the NiiX desktop via dconf ─────────────────
+info "Configuring NiiX panel + start menu..."
 
 # Dash to Panel — bottom Windows-style taskbar
 dconf load /org/gnome/shell/extensions/dash-to-panel/ <<'DTP'
@@ -2423,7 +2538,7 @@ enabled-extensions=['appindicatorsupport@rgcjonas.gmail.com', 'dash-to-panel@jde
 favorite-apps=['org.gnome.Nautilus.desktop', 'org.gnome.Terminal.desktop', 'helium.desktop', 'net.lutris.Lutris.desktop', 'steam.desktop', 'heroic.desktop', 'com.stremio.Stremio.desktop']
 SHELLD
 
-log "AnduinOS-style desktop configured (fully applies after the reboot below)"
+log "NiiX desktop configured (fully applies after the reboot below)"
 
 # ── CachyOS kernel ────────────────────────────────────────
 if ! pacman -Q linux-cachyos &>/dev/null; then
@@ -2435,25 +2550,37 @@ if ! pacman -Q linux-cachyos &>/dev/null; then
     cd ~ && rm -rf /tmp/cachyos-repo /tmp/cachyos-repo.tar.xz
 
     info "Installing CachyOS kernel..."
-    sudo pacman -Sy --noconfirm --needed linux-cachyos linux-cachyos-headers
+    pac_retry -Sy --noconfirm --needed linux-cachyos linux-cachyos-headers \
+        || warn "CachyOS kernel install failed — staying on the stock linux kernel for now."
     log "CachyOS kernel installed"
 
-    info "Switching to systemd initramfs hooks for CachyOS..."
-    if [ "$GPU_VENDOR" = "nvidia" ]; then
-        sudo tee /etc/mkinitcpio.conf > /dev/null <<'MKEOF'
-MODULES=(nvidia nvidia_modeset nvidia_uvm nvidia_drm)
-BINARIES=()
-FILES=()
-HOOKS=(base systemd autodetect microcode modconf kms keyboard sd-vconsole block sd-encrypt btrfs filesystems fsck)
-MKEOF
-    else
-        sudo tee /etc/mkinitcpio.conf > /dev/null <<'MKEOF'
-MODULES=()
-BINARIES=()
-FILES=()
-HOOKS=(base systemd autodetect microcode modconf kms keyboard sd-vconsole block sd-encrypt btrfs filesystems fsck)
-MKEOF
+    # Build DKMS modules (e.g. NVIDIA) against the new kernel explicitly. The
+    # in-transaction build can race the headers and leave the module missing,
+    # which produces an unbootable "module not found: nvidia" initramfs.
+    if pacman -Qq 2>/dev/null | grep -qE '^nvidia-(open-)?dkms$'; then
+        info "Building NVIDIA kernel module for CachyOS (DKMS)..."
+        sudo dkms autoinstall 2>/dev/null || true
     fi
+
+    info "Switching to systemd initramfs hooks for CachyOS..."
+    # Only put NVIDIA in the initramfs if its module actually built — otherwise the
+    # box still boots on nouveau instead of dropping to a black screen.
+    NV_MODULES=""
+    if [ "$GPU_VENDOR" = "nvidia" ]; then
+        if sudo dkms status 2>/dev/null | grep -qiE 'nvidia.*: *installed'; then
+            NV_MODULES="nvidia nvidia_modeset nvidia_uvm nvidia_drm"
+            log "NVIDIA DKMS module built — adding to initramfs"
+        else
+            warn "NVIDIA module did not build — booting with nouveau fallback."
+            warn "After install, run: sudo dkms autoinstall && sudo mkinitcpio -P"
+        fi
+    fi
+    sudo tee /etc/mkinitcpio.conf > /dev/null <<MKEOF
+MODULES=($NV_MODULES)
+BINARIES=()
+FILES=()
+HOOKS=(base systemd autodetect microcode modconf kms keyboard sd-vconsole block sd-encrypt btrfs filesystems fsck)
+MKEOF
 
     sudo mkinitcpio -P
     log "initramfs rebuilt with systemd hooks"
@@ -2464,7 +2591,7 @@ fi
 # ── LAVD scheduler ────────────────────────────────────────
 if ! pacman -Q scx-scheds &>/dev/null; then
     info "Installing LAVD scheduler..."
-    sudo pacman -S --noconfirm --needed scx-scheds
+    pac_retry -S --noconfirm --needed scx-scheds
     echo "SCX_SCHEDULER=scx_lavd" | sudo tee /etc/default/scx > /dev/null
     SCX_SVC=$(systemctl list-unit-files 2>/dev/null | grep -i "^scx" | awk '{print $1}' | head -1)
     if [ -n "$SCX_SVC" ]; then
@@ -2539,7 +2666,7 @@ sudo pacman -Rns --noconfirm linux linux-headers 2>/dev/null \
 
 # ── Create @clean bootable fallback subvolume ─────────────
 info "Creating @clean Btrfs fallback snapshot..."
-MAPPER_DEV=$(findmnt -n -o SOURCE / | head -1)
+MAPPER_DEV=$(findmnt -n --nofsroot -o SOURCE / | head -1)
 TMP_MNT=$(mktemp -d)
 if mount -o subvol=/ "$MAPPER_DEV" "$TMP_MNT" 2>/dev/null; then
     btrfs subvolume show "$TMP_MNT/@clean" &>/dev/null \
@@ -2556,7 +2683,7 @@ rmdir "$TMP_MNT" 2>/dev/null || true
 sudo tee /usr/local/bin/niixarch-refresh-clean > /dev/null <<'REFRESHEOF'
 #!/bin/bash
 echo "Refreshing @clean snapshot to current system state..."
-MAPPER_DEV=$(findmnt -n -o SOURCE / | head -1)
+MAPPER_DEV=$(findmnt -n --nofsroot -o SOURCE / | head -1)
 TMP_MNT=$(mktemp -d)
 mount -o subvol=/ "$MAPPER_DEV" "$TMP_MNT" || { echo "Mount failed"; exit 1; }
 btrfs subvolume show "$TMP_MNT/@clean" &>/dev/null \
@@ -2627,6 +2754,9 @@ fi
 info "Generating NiiX icons for newly installed apps..."
 sudo /usr/local/bin/niix-iconify --quiet 2>/dev/null || true
 log "App icons reconciled"
+
+# Hide GNOME's one-time welcome tour from the menu (kept installed; just hidden)
+/usr/local/bin/niix-hide-app org.gnome.Tour >/dev/null 2>&1 || true
 
 # ── Pin apps to GNOME Dash ──────────────────────────────
 # Desktop IDs confirmed from live system ls /usr/share/applications/:
@@ -2818,9 +2948,35 @@ auto_detect_mode() {
 
     echo
     if [[ "$windows_found" == true ]]; then
-        INSTALL_MODE="dualboot"
-        echo -e "  ${GREEN}✓${NC}  ${WHITE}${BOLD}Windows detected — installing in dual-boot mode${NC}"
-        echo -e "  ${DIM}  Arch will be installed alongside Windows. No existing data will be touched.${NC}"
+        echo -e "  ${GREEN}✓${NC}  ${WHITE}${BOLD}Windows detected on an internal drive${NC}"
+        echo
+        echo -e "  ${WHITE}${BOLD}How do you want to install?${NC}"
+        echo -e "  ${GREEN}[1]${NC}  ${WHITE}Dual-boot${NC}    — keep Windows, install Arch alongside it  ${DIM}(recommended)${NC}"
+        echo -e "  ${GREEN}[2]${NC}  ${WHITE}Single-boot${NC}  — ${RED}ERASE an entire drive${NC} (including Windows) and use it for Arch"
+        echo
+        echo -e "  ${DIM}Press Enter for the safe choice (dual-boot).${NC}"
+        read -rp "  Choose [1/2]: " WIN_MODE_CHOICE
+        if [[ "$WIN_MODE_CHOICE" == "2" ]]; then
+            # Beginner-safety gate: an explicit typed phrase, not just a number,
+            # so this can never be triggered by an accidental keypress.
+            echo
+            warn "Single-boot ERASES a whole drive. Windows and everything on it will be gone."
+            warn "There is no undo. You will still choose which drive and confirm again later."
+            echo
+            echo -e "  ${RED}${BOLD}Type exactly:  ERASE WINDOWS  to continue (anything else keeps Windows):${NC}"
+            read -rp "  > " WIN_WIPE_CONFIRM
+            if [[ "$WIN_WIPE_CONFIRM" == "ERASE WINDOWS" ]]; then
+                INSTALL_MODE="singleboot"
+                warn "Single-boot selected — you will pick the drive to erase next."
+            else
+                INSTALL_MODE="dualboot"
+                log "Phrase did not match — keeping Windows (dual-boot)."
+            fi
+        else
+            INSTALL_MODE="dualboot"
+            echo -e "  ${GREEN}✓${NC}  ${WHITE}${BOLD}Dual-boot — Windows will be preserved${NC}"
+            echo -e "  ${DIM}  Arch installs into free space. No existing data is touched.${NC}"
+        fi
     else
         INSTALL_MODE="singleboot"
         echo -e "  ${CYAN}·${NC}  ${WHITE}${BOLD}No existing OS detected — installing in single-boot mode${NC}"
