@@ -2549,6 +2549,18 @@ if ! pacman -Q linux-cachyos &>/dev/null; then
     cd cachyos-repo && yes | sudo ./cachyos-repo.sh
     cd ~ && rm -rf /tmp/cachyos-repo /tmp/cachyos-repo.tar.xz
 
+    # cachyos-repo.sh runs its own full upgrade, which frequently dies on the
+    # stale cdn77.cachyos.org mirror (a known CachyOS issue: 404 on glibc/gcc/lib32).
+    # Re-rank to working mirrors so this run AND the user's future 'pacman -Syu' work.
+    info "Ranking CachyOS mirrors (avoids the stale cdn77 default)..."
+    pac_retry -Sy --noconfirm --needed cachyos-rate-mirrors || true
+    if command -v cachyos-rate-mirrors >/dev/null 2>&1; then
+        sudo cachyos-rate-mirrors || warn "Mirror ranking failed — continuing with current mirrors."
+    fi
+    info "Completing CachyOS system upgrade..."
+    pac_retry -Syu --noconfirm \
+        || warn "System upgrade incomplete — run 'sudo cachyos-rate-mirrors && sudo pacman -Syu' once mirrors sync."
+
     info "Installing CachyOS kernel..."
     pac_retry -Sy --noconfirm --needed linux-cachyos linux-cachyos-headers \
         || warn "CachyOS kernel install failed — staying on the stock linux kernel for now."
