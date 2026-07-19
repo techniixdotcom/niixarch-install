@@ -3,8 +3,8 @@
 #  NiiX Arch Installer  //  arch.niiix.net
 #  Modes   : Dual-boot (Arch + Windows)  |  Single-boot (bare drive)
 #  Stack   : LUKS2 · Btrfs · Limine · CachyOS · GNOME (customised)
-#  Desktop : dash-to-panel + ArcMenu + auto-rotate (clean desktop, no icons)
-#  Extras  : Auto GPU drivers · Gaming (Steam/Lutris/Heroic) · Wi-Fi hotspot
+#  Desktop : dash-to-panel + ArcMenu + auto-rotate
+#  Extras  : Auto GPU drivers · Gaming (Steam/Lutris/Heroic)
 #
 #  Requirements:
 #    - UEFI system (not legacy BIOS)
@@ -64,6 +64,7 @@ LOCALE="en_GB.UTF-8"
 MIRROR_COUNTRY="Switzerland"
 MAPPER="cryptroot"
 BTRFS_OPTS="noatime,compress=zstd,space_cache=v2"
+NIIX_BUILD="2026-07-19-r10"  # bump on every change — printed on the banner to verify freshness
 
 # ── Install mode ─────────────────────────────────────────────
 INSTALL_MODE=""    # "dualboot" | "singleboot"
@@ -83,12 +84,13 @@ FREE_START=""; FREE_END=""
 USE_MITIGATIONS=false
 
 # ── Hardware (detected at runtime) ───────────────────────────
-CPU_VENDOR=""; CPU_MODEL=""; GPU_VENDOR=""; GPU_MODEL=""; GPU_GEN=""
+CPU_VENDOR=""; CPU_MODEL=""; GPU_VENDOR=""; GPU_MODEL=""; GPU_GEN=""; NVIDIA_LEGACY=""
+HAS_NVIDIA=0; HAS_AMD=0; HAS_INTEL=0; GPU_COUNT=0; IS_HYBRID=false; OFFLOAD_MODE=""
 MEM_TOTAL_GB=0; HAS_NVME=false; HAS_SSD=false
 
 # ── Output helpers ──────────────────────────────────────────
 log()  { echo -e "  ${GREEN}✓${NC}  $*"; }
-warn() { echo -e "  ${YELLOW}⚠${NC}  $*"; }
+warn() { echo -e "  ${YELLOW}⚠ ${NC}  $*"; }
 err()  {
     echo -e "\n  ${RED}✗${NC}  ${RED}ERROR:${NC} $*"
     dump_state "ERROR: $*" 2>/dev/null || true
@@ -185,6 +187,7 @@ banner() {
     echo -e "${GREEN}  ╚═╝  ╚═══╝╚═╝╚═╝╚═╝  ╚═╝╚═╝  ╚═╝${PINK}╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝${NC}"
     echo
     echo -e "  ${DIM}luks2 · cachyos · limine · btrfs · gnome  //  installer${NC}"
+    echo -e "  ${GREEN}▸ build ${NIIX_BUILD}${NC}   ${DIM}(if this line is missing/old, you're running a stale script)${NC}"
     echo -e "  ${PINK}────────────────────────────────────────────────────────${NC}"
     echo
     echo -e "  ${PINK}◈${NC}  ${WHITE}${BOLD}Required before running${NC}"
@@ -209,16 +212,32 @@ detect_hardware() {
     fi
     log "CPU: $CPU_MODEL ($CPU_VENDOR)"
 
-    # GPU — detect via lspci descriptions
+    # GPU — detect via lspci descriptions. Count every GPU so hybrid (iGPU + dGPU)
+    # laptops are handled correctly, not just the "primary" card.
     GPU_DESCS=$(lspci 2>/dev/null | grep -iE "VGA|3D|Display" | sed 's/.*: //')
-    local has_nvidia has_amd has_intel
-    has_nvidia=$(echo "$GPU_DESCS" | grep -ciE "NVIDIA" || true)
-    has_amd=$(echo "$GPU_DESCS" | grep -ciE "\bAMD\b|\bATI\b|\bRadeon\b|Advanced Micro" || true)
-    has_intel=$(echo "$GPU_DESCS" | grep -ciE "Intel" || true)
+    GPU_COUNT=$(lspci 2>/dev/null | grep -ciE "VGA compatible controller|3D controller|Display controller")
+    HAS_NVIDIA=$(echo "$GPU_DESCS" | grep -ciE "NVIDIA" || true)
+    HAS_AMD=$(echo "$GPU_DESCS" | grep -ciE "\bAMD\b|\bATI\b|\bRadeon\b|Advanced Micro" || true)
+    HAS_INTEL=$(echo "$GPU_DESCS" | grep -ciE "Intel" || true)
+    local has_nvidia="$HAS_NVIDIA" has_amd="$HAS_AMD" has_intel="$HAS_INTEL"
 
     if [[ "$has_nvidia" -gt 0 ]]; then
         GPU_VENDOR="nvidia"
         GPU_MODEL=$(echo "$GPU_DESCS" | grep -iE "NVIDIA" | head -1)
+        # Classify the architecture (codename first, marketing name as fallback).
+        # This decides the driver: NVIDIA's mainline driver (R590+, Dec 2025) supports
+        # only Turing and newer; Maxwell/Pascal/Kepler need a legacy AUR branch.
+        if echo "$GPU_MODEL" | grep -qiE "TU[0-9]{3}|GA[0-9]{3}|AD[0-9]{3}|GB[0-9]{3}|GH[0-9]{3}|RTX [0-9]|GTX 16[0-9]{2}"; then
+            GPU_GEN="turing_plus"; NVIDIA_LEGACY=""
+        elif echo "$GPU_MODEL" | grep -qiE "GM[0-9]{3}|GP[0-9]{3}|GTX 9[0-9]{2}|GTX 10[0-9]{2}|TITAN X"; then
+            GPU_GEN="maxwell_pascal"; NVIDIA_LEGACY="580xx"
+        elif echo "$GPU_MODEL" | grep -qiE "GK[0-9]{3}|GTX 6[0-9]{2}|GTX 7[0-9]{2}"; then
+            GPU_GEN="kepler"; NVIDIA_LEGACY="470xx"
+        elif echo "$GPU_MODEL" | grep -qiE "GF[0-9]{3}|GTX [45][0-9]{2}"; then
+            GPU_GEN="fermi"; NVIDIA_LEGACY=""
+        else
+            GPU_GEN="turing_plus"; NVIDIA_LEGACY=""   # unknown → assume modern
+        fi
     elif [[ "$has_amd" -gt 0 ]]; then
         GPU_VENDOR="amd"
         GPU_MODEL=$(echo "$GPU_DESCS" | grep -iE "\bAMD\b|\bATI\b|\bRadeon\b|Advanced Micro" | head -1)
@@ -230,7 +249,16 @@ detect_hardware() {
         GPU_VENDOR="intel"
         GPU_MODEL=$(echo "$GPU_DESCS" | grep -iE "Intel" | head -1)
     fi
+
+    # Hybrid topology + how games should reach the discrete GPU. Bias toward "hybrid"
+    # when unsure: treating a single-GPU box as hybrid is harmless (the desktop key is
+    # ignored), whereas forcing a hybrid box to single-GPU breaks the iGPU display.
+    [[ "${GPU_COUNT:-0}" -ge 2 ]] && IS_HYBRID=true || IS_HYBRID=false
+    if [[ "$IS_HYBRID" == true ]]; then
+        if [[ "$has_nvidia" -gt 0 ]]; then OFFLOAD_MODE="nvidia"; else OFFLOAD_MODE="dri-prime"; fi
+    fi
     log "GPU: $GPU_MODEL ($GPU_VENDOR${GPU_GEN:+ $GPU_GEN})"
+    [[ "$IS_HYBRID" == true ]] && log "Hybrid graphics: $GPU_COUNT GPUs — games will offload to the dGPU ($OFFLOAD_MODE)"
 
     [[ "$GPU_VENDOR" == "unknown" || -z "$GPU_VENDOR" ]] \
         && warn "Could not detect GPU — drivers will need manual install"
@@ -247,17 +275,120 @@ detect_hardware() {
     log "Storage: NVMe=$HAS_NVME SSD=$HAS_SSD"
 }
 
+# ── WiFi connection — used by pre-flight when there's no link yet ─────
+# Works on both the official Arch ISO (iwd/iwctl) and the NiiX ISO
+# (NetworkManager/nmcli). Interactive: scans, asks for SSID + password,
+# connects, and verifies real internet before returning.
+connect_wifi() {
+    command -v rfkill &>/dev/null && rfkill unblock wifi 2>/dev/null || true
+
+    local wifi_if d
+    wifi_if=$(iw dev 2>/dev/null | awk '/Interface/{print $2; exit}')
+    if [ -z "$wifi_if" ]; then
+        for d in /sys/class/net/wl*; do [ -e "$d" ] && { wifi_if=$(basename "$d"); break; }; done
+    fi
+    if [ -z "$wifi_if" ]; then
+        warn "No WiFi adapter detected."
+        return 1
+    fi
+
+    local backend=""
+    if command -v nmcli &>/dev/null; then
+        systemctl is-active --quiet NetworkManager 2>/dev/null || systemctl start NetworkManager 2>/dev/null || true
+        systemctl is-active --quiet NetworkManager 2>/dev/null && backend="nm"
+    fi
+    if [ -z "$backend" ] && command -v iwctl &>/dev/null; then
+        systemctl start iwd 2>/dev/null || true
+        backend="iwd"
+    fi
+    if [ -z "$backend" ]; then
+        warn "No WiFi tool available (need nmcli or iwctl)."
+        return 1
+    fi
+
+    info "WiFi adapter: $wifi_if  ·  backend: $backend"
+
+    local ssid wpass ok i again
+    while true; do
+        echo
+        info "Scanning for networks..."
+        if [ "$backend" = "nm" ]; then
+            nmcli device wifi rescan ifname "$wifi_if" 2>/dev/null || nmcli device wifi rescan 2>/dev/null || true
+            sleep 3
+            nmcli -t -f SSID,SIGNAL,SECURITY device wifi list 2>/dev/null \
+                | awk -F: 'length($1){printf "     %-32s  %3s%%  %s\n",$1,$2,($3==""?"open":$3)}' \
+                | sort -u | head -25
+        else
+            iwctl station "$wifi_if" scan 2>/dev/null || true
+            sleep 3
+            iwctl station "$wifi_if" get-networks 2>/dev/null \
+                | sed -e 's/\x1b\[[0-9;]*m//g' | awk 'NR>4 && NF{print "     "$0}' | head -25
+        fi
+
+        echo
+        read -rp "  WiFi network name (SSID) — or 'skip' to cancel: " ssid
+        if [ -z "$ssid" ]; then continue; fi
+        if [ "$ssid" = "skip" ]; then warn "WiFi setup skipped."; return 1; fi
+        read -rsp "  WiFi password (leave blank if open): " wpass; echo
+
+        info "Connecting to '$ssid'..."
+        if [ "$backend" = "nm" ]; then
+            if [ -n "$wpass" ]; then
+                nmcli device wifi connect "$ssid" password "$wpass" ifname "$wifi_if" 2>&1 | sed 's/^/     /'
+            else
+                nmcli device wifi connect "$ssid" ifname "$wifi_if" 2>&1 | sed 's/^/     /'
+            fi
+        else
+            if [ -n "$wpass" ]; then
+                iwctl --passphrase "$wpass" station "$wifi_if" connect "$ssid" 2>&1 | sed 's/^/     /'
+            else
+                iwctl station "$wifi_if" connect "$ssid" 2>&1 | sed 's/^/     /'
+            fi
+        fi
+
+        ok=false
+        for i in 1 2 3 4 5; do
+            ping -c1 -W3 archlinux.org &>/dev/null && { ok=true; break; }
+            sleep 2
+        done
+        if $ok; then
+            log "Connected to '$ssid' — internet is up"
+            return 0
+        fi
+
+        warn "Still no internet on '$ssid' (wrong password, weak signal, or captive portal?)."
+        read -rp "  Try a different network / retry? [Y/n]: " again
+        case "${again,,}" in n|no) warn "WiFi setup cancelled."; return 1 ;; esac
+    done
+}
+
+# ── Ensure internet, bringing up WiFi if there's no active link ──────
+ensure_internet() {
+    info "Checking internet connection..."
+    local i
+    for i in 1 2 3; do
+        if ping -c1 -W3 archlinux.org &>/dev/null; then
+            log "Internet connection detected"
+            return 0
+        fi
+        sleep 2
+    done
+
+    warn "No wired/active connection found — let's set up WiFi."
+    connect_wifi && return 0
+    err "No internet connection. Connect Ethernet or WiFi, then re-run the installer."
+}
+
 # ── Step 0: Pre-flight checks ────────────────────────────────
 check_prereqs() {
     hr "Pre-flight Checks"
     info "Running pre-flight checks..."
 
     [ "$EUID" -eq 0 ]        || err "Please run as root"
-    [ -d /sys/firmware/efi ] || err "Not booted in UEFI mode — enable UEFI in BIOS"
 
-    info "Checking internet connection..."
-    ping -c 1 -W 3 archlinux.org &>/dev/null \
-        || err "No internet. For WiFi: iwctl  then  station wlan0 connect 'YourSSID'"
+    ensure_internet
+
+    [ -d /sys/firmware/efi ] || err "Not booted in UEFI mode — enable UEFI in BIOS"
 
     for cmd in cryptsetup parted mkfs.btrfs python3 efibootmgr lsblk blkid; do
         command -v "$cmd" &>/dev/null || err "$cmd not found on live ISO"
@@ -414,6 +545,7 @@ PYEOF
         echo
         ask "Which region should Arch use? Enter the number:"
         read -rp "  > " CHOICE
+        [[ "$CHOICE" =~ ^[0-9]+$ ]] || err "Invalid choice: $CHOICE"
 
         CHOSEN=$(echo "$FREE_SPACE_LIST" | grep "^${CHOICE}:")
         [[ -n "$CHOSEN" ]] || err "Invalid choice: $CHOICE"
@@ -587,6 +719,7 @@ PYEOF
     echo -e "  ${RED}${BOLD}WARNING: The selected partition will be PERMANENTLY DELETED.${NC}"
     ask "Which partition should be deleted for Arch? Enter the number:"
     read -rp "  > " DEL_CHOICE
+    [[ "$DEL_CHOICE" =~ ^[0-9]+$ ]] || err "Invalid choice: $DEL_CHOICE"
 
     DEL_CHOSEN=$(echo "$PART_LIST" | grep "^${DEL_CHOICE}:")
     [[ -n "$DEL_CHOSEN" ]] || err "Invalid choice: $DEL_CHOICE"
@@ -973,94 +1106,63 @@ enable_multilib() {
 
 # ── GPU drivers (auto-detected) ──────────────────────────────
 install_gpu_drivers() {
-    hr "GPU Driver Install"
-    info "Installing $GPU_VENDOR GPU drivers..."
+    hr "GPU Base Userspace"
 
-    # multilib and parallel downloads already enabled by enable_multilib() — just refresh
+    # multilib + parallel downloads already enabled by enable_multilib() — refresh
     arch-chroot /mnt pacman -Sy --noconfirm
 
-    case "$GPU_VENDOR" in
-        amd)
-            arch-chroot /mnt pacman -S --noconfirm --needed \
-                mesa lib32-mesa \
-                vulkan-radeon lib32-vulkan-radeon \
-                vulkan-icd-loader lib32-vulkan-icd-loader \
-                libva-mesa-driver lib32-libva-mesa-driver \
-                xf86-video-amdgpu
-            # AMD environment vars
-            cat >> /mnt/etc/environment <<'AMDENV'
-AMD_VULKAN_ICD=RADV
-LIBVA_DRIVER_NAME=radeonsi
-MOZ_DISABLE_RDD_SANDBOX=1
-AMDENV
-            log "AMD GPU drivers installed"
-            ;;
-        nvidia)
-            # Driver choice by GPU generation:
-            #   • Turing (GTX 16xx / RTX 20xx) and newer → open kernel modules (NVIDIA's
-            #     recommended driver for these cards).
-            #   • Maxwell / Pascal / Volta (GTX 9xx/10xx, Titan X/V) → proprietary nvidia-dkms.
-            #   • Kepler/Fermi and older are NOT supported by the mainline driver and need a
-            #     legacy AUR branch — we warn rather than guess.
-            local nvidia_pkg="nvidia-dkms"
-            if echo "$GPU_MODEL" | grep -qiE "RTX [0-9]|GTX 16[0-9]{2}|RTX A[0-9]|MX5[0-9]{2}|Ada|Ampere|Hopper|Blackwell"; then
-                nvidia_pkg="nvidia-open-dkms"
-                log "NVIDIA Turing+ detected → open kernel modules (nvidia-open-dkms)"
-            else
-                log "NVIDIA Maxwell/Pascal/Volta (or unknown) → proprietary driver (nvidia-dkms)"
-            fi
-            if echo "$GPU_MODEL" | grep -qiE "GTX [67][0-9]{2}|GT [67][0-9]{2}|GeForce [4-8][0-9]{2}M?\b|Kepler|Fermi"; then
-                warn "Old NVIDIA GPU ($GPU_MODEL) — mainline driver may not support it."
-                warn "If graphics fail after first boot, install a legacy driver from the AUR:"
-                warn "  Kepler → nvidia-470xx-dkms   |   Fermi → nvidia-390xx-dkms"
-            fi
-            arch-chroot /mnt pacman -S --noconfirm --needed \
-                "$nvidia_pkg" nvidia-utils lib32-nvidia-utils \
-                nvidia-settings \
-                vulkan-icd-loader lib32-vulkan-icd-loader \
-                libva-nvidia-driver
-            # NVIDIA modprobe config
-            echo "options nvidia-drm modeset=1 fbdev=1" > /mnt/etc/modprobe.d/nvidia.conf
-            # NVIDIA environment vars
-            cat >> /mnt/etc/environment <<'NVENV'
-LIBVA_DRIVER_NAME=nvidia
+    # Minimal Mesa/Vulkan so the FIRST boot reaches the desktop on the iGPU and has
+    # 32-bit GL for Steam. The actual vendor drivers and the full Optimus/PRIME setup
+    # (NVIDIA legacy 580xx/470xx, nvidia-prime, switcheroo-control, RTD3 workaround,
+    # initramfs) are installed at first boot by CachyOS hardware detection (chwd),
+    # which is the tested path — we no longer hand-roll driver logic.
+    local base_pkgs=(mesa lib32-mesa vulkan-icd-loader lib32-vulkan-icd-loader \
+                     vulkan-mesa-layers lib32-vulkan-mesa-layers)
+    if [[ "$HAS_INTEL" -gt 0 ]]; then
+        base_pkgs+=(vulkan-intel lib32-vulkan-intel intel-media-driver)
+        info "Intel graphics detected → mesa + vulkan-intel"
+    fi
+    if [[ "$HAS_AMD" -gt 0 ]]; then
+        base_pkgs+=(vulkan-radeon lib32-vulkan-radeon libva-mesa-driver lib32-libva-mesa-driver)
+        info "AMD graphics detected → mesa + vulkan-radeon"
+    fi
+    arch-chroot /mnt pacman -S --noconfirm --needed "${base_pkgs[@]}" \
+        || warn "Some Mesa/Vulkan packages failed to install."
+
+    # Firefox VAAPI hint + shader cache — harmless, vendor-agnostic.
+    cat >> /mnt/etc/environment <<'COMMONENV'
 MOZ_DISABLE_RDD_SANDBOX=1
 __GL_SHADER_DISK_CACHE=1
 __GL_SHADER_DISK_CACHE_SKIP_CLEANUP=1
-GBM_BACKEND=nvidia-drm
-__GLX_VENDOR_LIBRARY_NAME=nvidia
-WLR_NO_HARDWARE_CURSORS=1
-NVENV
-            log "NVIDIA GPU drivers installed ($nvidia_pkg)"
-            ;;
-        intel)
-            arch-chroot /mnt pacman -S --noconfirm --needed \
-                mesa lib32-mesa \
-                vulkan-intel lib32-vulkan-intel \
-                vulkan-icd-loader lib32-vulkan-icd-loader \
-                intel-media-driver libva-intel-driver lib32-libva-intel-driver
-            cat >> /mnt/etc/environment <<'INTENV'
-LIBVA_DRIVER_NAME=iHD
-MOZ_DISABLE_RDD_SANDBOX=1
-INTENV
-            log "Intel GPU drivers installed"
-            ;;
-        *)
-            warn "Unknown GPU vendor — skipping driver install"
-            ;;
-    esac
+COMMONENV
+
+    log "GPU base userspace installed (chwd configures the real drivers at first boot)"
 }
 
 # ── All pacman packages (gaming, security, tools) ────────────
+# Install a batch into the target. If the atomic transaction fails for ANY reason
+# (a mirror blip, a single unavailable package, a provider prompt), retry each
+# package individually so one failure can't silently wipe out the whole group.
+chroot_install() {
+    if arch-chroot /mnt pacman -S --noconfirm --needed "$@"; then return 0; fi
+    warn "Batch install failed — retrying each package individually..."
+    local p okc=0 badc=0
+    for p in "$@"; do
+        if arch-chroot /mnt pacman -S --noconfirm --needed "$p"; then okc=$((okc+1))
+        else warn "  could not install: $p"; badc=$((badc+1)); fi
+    done
+    log "Per-package retry: ${okc} installed, ${badc} failed"
+    return 0
+}
+
 install_packages() {
     hr "Package Install"
     info "Installing packages (gaming, security, tools)..."
 
-    arch-chroot /mnt pacman -S --noconfirm --needed \
+    chroot_install \
         linux-headers \
         gamemode lib32-gamemode mangohud lib32-mangohud \
         gamescope \
-        yakuake \
         wine winetricks \
         vkd3d lib32-vkd3d \
         ananicy-cpp \
@@ -1073,6 +1175,7 @@ install_packages() {
         dnsmasq \
         snapper snap-pac \
         gnome-terminal \
+        xorg-server \
         libva-utils dmidecode \
         gnome-shell-extension-appindicator \
         reflector
@@ -1378,6 +1481,28 @@ NMWIFI
         info "No iwd WiFi profiles found (ethernet or WiFi not used during install) — skipping"
     fi
 
+    # ── Also copy any live NetworkManager connections to the target ──────
+    # The NiiX live ISO uses NetworkManager, so WiFi joined during pre-flight
+    # is stored here rather than in iwd. Copy the profiles across so the
+    # installed system auto-connects on first boot too.
+    if compgen -G "/etc/NetworkManager/system-connections/*.nmconnection" > /dev/null 2>&1; then
+        info "Copying live NetworkManager connections to the target..."
+        local nmcopied=0 src base dst
+        for src in /etc/NetworkManager/system-connections/*.nmconnection; do
+            [ -f "$src" ] || continue
+            base=$(basename "$src")
+            dst="/mnt/etc/NetworkManager/system-connections/$base"
+            [ -e "$dst" ] && continue
+            if cp "$src" "$dst" 2>/dev/null; then
+                chmod 600 "$dst"
+                nmcopied=$(( nmcopied + 1 ))
+            fi
+        done
+        [ "$nmcopied" -gt 0 ] \
+            && log "$nmcopied NetworkManager connection(s) copied — target will auto-connect" \
+            || info "No new NetworkManager connections to copy"
+    fi
+
     # ── systemd-resolved DNS config ─────────────────────────
     # Keep it simple — no DNSSEC/DoT which can silently break resolution
     # on many home/corporate networks. Cloudflare as primary, Quad9 fallback.
@@ -1505,11 +1630,27 @@ TIMELINE_CLEANUP="no"
 EMPTY_PRE_POST_CLEANUP="yes"
 EMPTY_PRE_POST_MIN_AGE="1800"
 SNAPEOF
+# Register the config — on Arch, snapper/snap-pac/snapper-cleanup only act on
+# configs listed in SNAPPER_CONFIGS (/etc/conf.d/snapper). A hand-written config
+# file alone is invisible to them, so pacman snapshots would never be taken and
+# cleanup would never run.
+mkdir -p /etc/conf.d
+if grep -q '^SNAPPER_CONFIGS=' /etc/conf.d/snapper 2>/dev/null; then
+    sed -i 's/^SNAPPER_CONFIGS=.*/SNAPPER_CONFIGS="root"/' /etc/conf.d/snapper
+else
+    echo 'SNAPPER_CONFIGS="root"' >> /etc/conf.d/snapper
+fi
 chmod 750 /.snapshots
-systemctl enable snapper-cleanup.timer
+systemctl enable snapper-cleanup.timer 2>/dev/null || true
 # Create the initial clean-install snapshot (pre-firstboot baseline)
 snapper --no-dbus -c root create --description "NiiX Arch — clean install" 2>/dev/null || true
 CHROOT
+
+    # Hard verification: the chroot heredoc runs with set -e, but the outer
+    # script does not, so a silent failure there would otherwise go unnoticed.
+    # A system without NetworkManager enabled has no network after first boot.
+    [[ -L /mnt/etc/systemd/system/multi-user.target.wants/NetworkManager.service ]] \
+        || err "chroot configuration failed — NetworkManager was not enabled. Check the log."
 
     log "LUKS UUID: $LUKS_UUID"
 
@@ -1825,6 +1966,12 @@ ExecStart=/usr/local/bin/niix-iconify --quiet
 WantedBy=multi-user.target
 SVCEOF
 
+    # Pre-create the watched directories — a systemd .path unit fails to start
+    # if a watched path does not exist yet (flatpak only creates exports/ on
+    # its first app install).
+    mkdir -p /mnt/var/lib/flatpak/exports/share/applications \
+             /mnt/usr/local/share/applications
+
     cat > /mnt/etc/systemd/system/niix-iconify.path <<'PATHEOF'
 [Unit]
 Description=Watch app directories for NiiX icon generation
@@ -1878,7 +2025,9 @@ Section "InputClass"
 EndSection
 EOF
 
-localectl set-x11-keymap "${KEYMAP_X11}"
+# NOTE: localectl is deliberately NOT used here — it needs a running systemd/dbus
+# and always fails inside a chroot (which would abort this set -e block).
+# The X11 keymap is already configured via 00-keyboard.conf above.
 CHROOT
 
     # ── NiiX Arch branding ───────────────────────────────────
@@ -1895,38 +2044,8 @@ CHROOT
     # Auto-iconify for any app installed later
     setup_auto_icons
 
-    # ── Yakuake drop-down terminal: toggle wrapper + autostart ───
-    cat > /mnt/usr/local/bin/niix-yakuake-toggle <<'YKEOF'
-#!/bin/bash
-# Toggle the Yakuake drop-down terminal; launch it first if not running.
-if pgrep -x yakuake >/dev/null 2>&1; then
-    dbus-send --session --type=method_call --dest=org.kde.yakuake \
-        /yakuake/window org.kde.yakuake.toggleWindow >/dev/null 2>&1
-else
-    setsid yakuake >/dev/null 2>&1 &
-    for _ in $(seq 1 30); do
-        dbus-send --session --dest=org.kde.yakuake --print-reply /yakuake/window \
-            org.freedesktop.DBus.Introspectable.Introspect >/dev/null 2>&1 && break
-        sleep 0.1
-    done
-fi
-YKEOF
-    chmod +x /mnt/usr/local/bin/niix-yakuake-toggle
-
-    # Autostart Yakuake at login (starts retracted/hidden)
-    mkdir -p /mnt/etc/xdg/autostart
-    cat > /mnt/etc/xdg/autostart/niix-yakuake.desktop <<'YKAUTO'
-[Desktop Entry]
-Type=Application
-Name=Yakuake
-Comment=Drop-down terminal
-Exec=yakuake
-Icon=yakuake
-Terminal=false
-X-GNOME-Autostart-enabled=true
-NoDisplay=true
-YKAUTO
-    log "Yakuake drop-down terminal configured (Ctrl+Alt+T)"
+    # Drop-down terminal: ddterm (a GNOME Shell extension, Wayland-native) is
+    # installed and configured in the first-boot phase, since it needs the AUR.
 
     # ── Hide-app helpers: tidy the menu without uninstalling ─────
     # Many apps are pulled in as GNOME dependencies and can't be removed, but you
@@ -2037,22 +2156,17 @@ rebuild_initramfs() {
     hr "Initramfs Rebuild"
     log "Writing final mkinitcpio.conf..."
 
-    # mkinitcpio hooks — busybox encrypt for stock kernel, systemd sd-encrypt for CachyOS
-    if [[ "$GPU_VENDOR" == "nvidia" ]]; then
-        cat > /mnt/etc/mkinitcpio.conf <<'MKINIT'
-MODULES=(nvidia nvidia_modeset nvidia_uvm nvidia_drm)
-BINARIES=()
-FILES=()
-HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block encrypt btrfs filesystems fsck)
-MKINIT
-    else
-        cat > /mnt/etc/mkinitcpio.conf <<'MKINIT'
+    # mkinitcpio hooks. NOTE: NVIDIA modules are deliberately NOT forced here —
+    # DKMS builds reliably only against the running kernel at first boot, so adding
+    # them now risks an unbootable "module not found: nvidia" initramfs. The first
+    # boot adds them once the module is confirmed built. The first boot runs on
+    # nouveau, which is fine for reaching the desktop.
+    cat > /mnt/etc/mkinitcpio.conf <<'MKINIT'
 MODULES=()
 BINARIES=()
 FILES=()
 HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block encrypt btrfs filesystems fsck)
 MKINIT
-    fi
 
     log "mkinitcpio.conf:"
     cat /mnt/etc/mkinitcpio.conf
@@ -2103,12 +2217,14 @@ install_limine() {
     mkdir -p /mnt/boot/limine /mnt/boot/EFI/limine
 
     if [[ "$INSTALL_MODE" == "dualboot" ]]; then
+        # default_entry is 1-based. Entry 1 is Windows, entry 2 is NiiX Arch —
+        # default to 2 so an unattended reboot lands in the freshly installed Arch.
         cat > /mnt/boot/EFI/limine/limine.cfg <<EOF
 timeout: 5
 interface_branding: NiiX Arch
 interface_branding_colour: 6
 interface_help_hidden: yes
-default_entry: 1
+default_entry: 2
 
 /Windows Boot Manager
     protocol: efi
@@ -2222,6 +2338,13 @@ SUDOEOF
 GPU_VENDOR=$GPU_VENDOR
 CPU_VENDOR=$CPU_VENDOR
 GPU_MODEL="$GPU_MODEL"
+GPU_GEN=$GPU_GEN
+NVIDIA_LEGACY=$NVIDIA_LEGACY
+HAS_NVIDIA=$HAS_NVIDIA
+HAS_AMD=$HAS_AMD
+HAS_INTEL=$HAS_INTEL
+IS_HYBRID=$IS_HYBRID
+OFFLOAD_MODE=$OFFLOAD_MODE
 IS_DUALBOOT=$([[ "$INSTALL_MODE" == "dualboot" ]] && echo true || echo false)
 CONFEOF
 
@@ -2239,7 +2362,7 @@ PINK='\033[38;5;205m'
 RED='\033[0;31m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; WHITE='\033[1;37m'; BOLD='\033[1m'; NC='\033[0m'
 log()  { echo -e "  ${GREEN}✓${NC}  $*"; }
-warn() { echo -e "  ${YELLOW}⚠${NC}  $*"; }
+warn() { echo -e "  ${YELLOW}⚠ ${NC}  $*"; }
 info() { echo -e "  ${CYAN}·${NC}  $*"; }
 
 # Retry pacman for transient mirror/CDN errors (e.g. CachyOS 404s). Refreshes the
@@ -2292,14 +2415,8 @@ gsettings set org.gnome.desktop.interface clock-show-weekday true 2>/dev/null ||
 # Windows-style titlebar buttons (min/max/close) — matches dash-to-panel look.
 gsettings set org.gnome.desktop.wm.preferences button-layout 'appmenu:minimize,maximize,close' 2>/dev/null || true
 
-# Ctrl+Alt+T → Yakuake drop-down terminal
-gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/']" 2>/dev/null || true
-gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ name "Yakuake" 2>/dev/null || true
-gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ command "/usr/local/bin/niix-yakuake-toggle" 2>/dev/null || true
-gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ binding "<Control><Alt>t" 2>/dev/null || true
-# Make Yakuake the default terminal (best effort — GNOME's key may be absent)
-gsettings set org.gnome.desktop.default-applications.terminal exec 'yakuake' 2>/dev/null || true
-gsettings set org.gnome.desktop.default-applications.terminal exec-arg '' 2>/dev/null || true
+# ddterm (drop-down terminal) is bound to F12 and Ctrl+Alt+T in PHASE 3,
+# after the extension is installed from the AUR.
 
 # Enable AppIndicator (tray icons). The panel, start menu, and auto-rotate
 # extensions are installed + enabled in PHASE 3 (need internet).
@@ -2313,6 +2430,28 @@ sudo systemctl enable --now bluetooth 2>/dev/null || true
 
 # ── Performance profile ───────────────────────────────────
 sudo powerprofilesctl set performance 2>/dev/null || true
+
+# ── Automatic dGPU for games on hybrid systems ────────────
+# On hybrid systems with a PROPRIETARY driver, tag the game launchers so GNOME runs
+# them on the dGPU automatically (via switcheroo-control). We deliberately skip this
+# on the nouveau path (legacy NVIDIA): launching Steam on the nouveau dGPU leaves it
+# with only a tray icon and no window, and nouveau can't reclock these cards anyway,
+# so per-game "DRI_PRIME=1 %command%" is the right tool there instead.
+if [ "$IS_HYBRID" = "true" ] && [ -z "$NVIDIA_LEGACY" ]; then
+    info "Configuring game launchers to use the discrete GPU automatically..."
+    sudo systemctl enable --now switcheroo-control.service 2>/dev/null || true
+    mkdir -p "$HOME/.local/share/applications"
+    for app in net.lutris.Lutris lutris heroic com.heroicgameslauncher.hgl; do
+        src="/usr/share/applications/${app}.desktop"
+        [ -f "$src" ] || continue
+        dst="$HOME/.local/share/applications/${app}.desktop"
+        cp "$src" "$dst"
+        grep -q '^PrefersNonDefaultGPU=' "$dst" || \
+            sed -i '0,/^\[Desktop Entry\]/s//[Desktop Entry]\nPrefersNonDefaultGPU=true\nX-KDE-RunOnDiscreteGpu=true/' "$dst"
+    done
+    update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
+    log "Game launchers set to run on the discrete GPU"
+fi
 
 # ── Gamemode config ───────────────────────────────────────
 mkdir -p "$HOME/.config"
@@ -2345,7 +2484,71 @@ monitor.bluez.properties = {
 BTEOF
 
 # ── fastfetch on terminal open ────────────────────────────
-echo 'fastfetch' >> "$HOME/.bashrc"
+grep -qx 'fastfetch' "$HOME/.bashrc" 2>/dev/null || echo 'fastfetch' >> "$HOME/.bashrc"
+
+# ── Steam warm-start + one-time first-launch notice ──────
+# Steam bundles a Chromium browser (steamwebhelper) that makes cold starts slow.
+#  1) Pre-load Steam minimized to the tray ~30s after login. The delay is a
+#     plain sleep so it never competes with the desktop starting up and works
+#     on any session manager, with no reliance on X-GNOME-Autostart-Delay.
+#  2) A PATH wrapper (terminal) + desktop override (icon clicks) shows a
+#     one-time popup explaining the first-launch wait, then hands off to the
+#     real Steam. The -silent autostart bypasses the wrapper entirely, so the
+#     notice only ever appears on the user's own first real launch.
+if [ -x /usr/bin/steam ]; then
+    info "Configuring Steam warm-start and first-launch notice..."
+    pac_retry -S --noconfirm --needed zenity libnotify || true
+
+    mkdir -p "$HOME/.config/autostart"
+    cat > "$HOME/.config/autostart/niix-steam-warmstart.desktop" <<'STEAMAUTOEOF'
+[Desktop Entry]
+Type=Application
+Name=Steam (pre-load, minimized)
+Comment=Added by NiiX first-boot — delete this file to disable
+Exec=sh -c 'sleep 30; exec /usr/bin/steam -silent'
+X-GNOME-Autostart-enabled=true
+STEAMAUTOEOF
+
+    sudo tee /usr/local/bin/steam > /dev/null <<'STEAMWRAPEOF'
+#!/bin/bash
+# NiiX wrapper: one-time first-launch notice, then hands off to the real Steam.
+# Remove with: sudo rm /usr/local/bin/steam ~/.local/share/applications/steam.desktop
+for arg in "$@"; do
+    [ "$arg" = "-silent" ] && exec /usr/bin/steam "$@"
+done
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/niix"
+FLAG="$STATE_DIR/steam-notice-shown"
+if [ ! -e "$FLAG" ]; then
+    mkdir -p "$STATE_DIR" && touch "$FLAG"
+    MSG="Steam can take a little while to appear — especially this very first launch, while it downloads client updates and finishes setting itself up.
+
+This is normal: Steam ships with its own built-in browser that has to start from cold each time it launches.
+
+Tip: NiiX pre-loads Steam in the background shortly after each login, so future launches are much faster."
+    if command -v zenity >/dev/null 2>&1; then
+        zenity --info --title="Steam is starting..." --width=380 --text="$MSG" &
+    elif command -v notify-send >/dev/null 2>&1; then
+        notify-send -u normal "Steam is starting..." "$MSG" &
+    fi
+fi
+exec /usr/bin/steam "$@"
+STEAMWRAPEOF
+    sudo chmod +x /usr/local/bin/steam
+
+    # Desktop override: Arch's steam.desktop uses an absolute Exec path, so the
+    # PATH wrapper alone would not catch icon clicks. Overriding with the same
+    # file ID keeps the dash pin working and survives steam package updates.
+    if [ -f /usr/share/applications/steam.desktop ]; then
+        mkdir -p "$HOME/.local/share/applications"
+        sed 's|^Exec=/usr/bin/steam|Exec=/usr/local/bin/steam|' \
+            /usr/share/applications/steam.desktop \
+            > "$HOME/.local/share/applications/steam.desktop"
+        update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
+    fi
+    log "Steam: warm-start at login + one-time first-launch notice"
+else
+    warn "Steam not found — skipping warm-start setup"
+fi
 
 # ── fastfetch config ──────────────────────────────────────
 mkdir -p "$HOME/.config/fastfetch"
@@ -2513,6 +2716,8 @@ dconf load /org/gnome/shell/extensions/arcmenu/ <<'ARCM'
 [/]
 menu-layout='Redmond'
 position-in-panel='Left'
+menu-button-appearance='Icon_Text'
+custom-menu-button-text='NiiX'
 menu-button-icon='Custom_Icon'
 custom-menu-button-icon='/usr/share/pixmaps/niixarch-logo.png'
 custom-menu-button-icon-size=28.0
@@ -2534,20 +2739,55 @@ ROT
 dconf load /org/gnome/shell/ <<'SHELLD'
 [/]
 disable-user-extensions=false
-enabled-extensions=['appindicatorsupport@rgcjonas.gmail.com', 'dash-to-panel@jderose9.github.com', 'arcmenu@arcmenu.com', 'screen-rotate@shyzus.github.io']
+enabled-extensions=['appindicatorsupport@rgcjonas.gmail.com', 'dash-to-panel@jderose9.github.com', 'arcmenu@arcmenu.com', 'screen-rotate@shyzus.github.io', 'ddterm@amezin.github.com']
 favorite-apps=['org.gnome.Nautilus.desktop', 'org.gnome.Terminal.desktop', 'helium.desktop', 'net.lutris.Lutris.desktop', 'steam.desktop', 'heroic.desktop', 'com.stremio.Stremio.desktop']
 SHELLD
 
 log "NiiX desktop configured (fully applies after the reboot below)"
 
+# ── ArcMenu branding: apply on the NEXT login, then self-remove ─────
+# ArcMenu re-initialises its settings the first time it loads, which wipes values
+# written here. A one-shot autostart re-applies the icon + "NiiX" text once GNOME
+# Shell and ArcMenu are actually running, then deletes itself.
+mkdir -p "$HOME/.local/bin" "$HOME/.config/autostart"
+cat > "$HOME/.local/bin/niix-brand-once.sh" <<'BRANDEOF'
+#!/bin/bash
+sleep 8
+AM=/org/gnome/shell/extensions/arcmenu
+dconf write $AM/menu-button-appearance "'Icon_Text'"
+dconf write $AM/custom-menu-button-text "'NiiX'"
+dconf write $AM/menu-button-icon "'Custom_Icon'"
+dconf write $AM/custom-menu-button-icon "'/usr/share/pixmaps/niixarch-logo.png'"
+dconf write $AM/custom-menu-button-icon-size 28.0
+rm -f "$HOME/.config/autostart/niix-brand.desktop" "$HOME/.local/bin/niix-brand-once.sh"
+BRANDEOF
+chmod +x "$HOME/.local/bin/niix-brand-once.sh"
+cat > "$HOME/.config/autostart/niix-brand.desktop" <<BRANDDT
+[Desktop Entry]
+Type=Application
+Name=NiiX Branding (one-shot)
+Exec=$HOME/.local/bin/niix-brand-once.sh
+X-GNOME-Autostart-enabled=true
+NoDisplay=true
+BRANDDT
+log "ArcMenu branding will apply on next login"
+
 # ── CachyOS kernel ────────────────────────────────────────
 if ! pacman -Q linux-cachyos &>/dev/null; then
     info "Setting up CachyOS repository..."
     cd /tmp
-    curl -O https://mirror.cachyos.org/cachyos-repo.tar.xz
-    tar xvf cachyos-repo.tar.xz
-    cd cachyos-repo && yes | sudo ./cachyos-repo.sh
-    cd ~ && rm -rf /tmp/cachyos-repo /tmp/cachyos-repo.tar.xz
+    rm -rf /tmp/cachyos-repo /tmp/cachyos-repo.tar.xz
+    if curl -fL --retry 5 --retry-delay 3 -o cachyos-repo.tar.xz \
+            https://mirror.cachyos.org/cachyos-repo.tar.xz \
+        && tar xf cachyos-repo.tar.xz \
+        && cd /tmp/cachyos-repo; then
+        yes | sudo ./cachyos-repo.sh
+        cd ~ && rm -rf /tmp/cachyos-repo /tmp/cachyos-repo.tar.xz
+    else
+        cd ~
+        warn "Could not download/extract the CachyOS repo installer — staying on the stock kernel."
+        warn "Re-run later: bash /usr/local/bin/niixarch-firstboot.sh"
+    fi
 
     # cachyos-repo.sh runs its own full upgrade, which frequently dies on the
     # stale cdn77.cachyos.org mirror (a known CachyOS issue: 404 on glibc/gcc/lib32).
@@ -2564,38 +2804,66 @@ if ! pacman -Q linux-cachyos &>/dev/null; then
     info "Installing CachyOS kernel..."
     pac_retry -Sy --noconfirm --needed linux-cachyos linux-cachyos-headers \
         || warn "CachyOS kernel install failed — staying on the stock linux kernel for now."
-    log "CachyOS kernel installed"
 
-    # Build DKMS modules (e.g. NVIDIA) against the new kernel explicitly. The
-    # in-transaction build can race the headers and leave the module missing,
-    # which produces an unbootable "module not found: nvidia" initramfs.
-    if pacman -Qq 2>/dev/null | grep -qE '^nvidia-(open-)?dkms$'; then
-        info "Building NVIDIA kernel module for CachyOS (DKMS)..."
-        sudo dkms autoinstall 2>/dev/null || true
-    fi
-
-    info "Switching to systemd initramfs hooks for CachyOS..."
-    # Only put NVIDIA in the initramfs if its module actually built — otherwise the
-    # box still boots on nouveau instead of dropping to a black screen.
-    NV_MODULES=""
-    if [ "$GPU_VENDOR" = "nvidia" ]; then
-        if sudo dkms status 2>/dev/null | grep -qiE 'nvidia.*: *installed'; then
-            NV_MODULES="nvidia nvidia_modeset nvidia_uvm nvidia_drm"
-            log "NVIDIA DKMS module built — adding to initramfs"
-        else
-            warn "NVIDIA module did not build — booting with nouveau fallback."
-            warn "After install, run: sudo dkms autoinstall && sudo mkinitcpio -P"
-        fi
-    fi
-    sudo tee /etc/mkinitcpio.conf > /dev/null <<MKEOF
-MODULES=($NV_MODULES)
+    # ── Only switch initramfs hooks if the CachyOS kernel is really installed ──
+    # sd-encrypt reads rd.luks.name= and IGNORES cryptdevice=. The Limine config
+    # is only converted to rd.luks.name= further below (and only when
+    # /boot/vmlinuz-linux-cachyos exists). If the kernel install failed and we
+    # switched hooks anyway, the stock kernel's initramfs would be rebuilt with
+    # sd-encrypt while Limine still passes cryptdevice= — no LUKS prompt, no boot.
+    if pacman -Q linux-cachyos &>/dev/null; then
+        log "CachyOS kernel installed"
+        info "Switching to systemd initramfs hooks for CachyOS..."
+        # No GPU modules are forced here. CachyOS hardware detection (chwd, below) installs
+        # the right driver and its pacman hook rebuilds the initramfs correctly for the
+        # detected topology (early-KMS for a single dGPU, offload-only for Optimus).
+        sudo tee /etc/mkinitcpio.conf > /dev/null <<'MKEOF'
+MODULES=()
 BINARIES=()
 FILES=()
 HOOKS=(base systemd autodetect microcode modconf kms keyboard sd-vconsole block sd-encrypt btrfs filesystems fsck)
 MKEOF
+        sudo mkinitcpio -P
+        log "initramfs rebuilt with systemd hooks"
+    else
+        warn "linux-cachyos not installed — keeping the stock kernel and its encrypt-hook initramfs."
+    fi
 
-    sudo mkinitcpio -P
-    log "initramfs rebuilt with systemd hooks"
+    # ── GPU drivers ──────────────────────────────────────────
+    # Strategy:
+    #   • Legacy NVIDIA (Maxwell/Pascal/Kepler) → the in-kernel NOUVEAU driver. It
+    #     supports these cards AND PRIME offload, runs fine under Wayland, and has
+    #     none of the proprietary/DKMS/kernel-version fragility that loops the login
+    #     on these old GPUs. No proprietary driver is installed.
+    #   • Everything else (modern NVIDIA Turing+, AMD, Intel) → CachyOS hardware
+    #     detection (chwd), which installs the right tested profile.
+    # Either way the iGPU drives the display under Wayland and the dGPU is reached via
+    # switcheroo offload — no X11, no driver that can crash the session.
+    if [ "$GPU_VENDOR" = "nvidia" ] && [ -n "$NVIDIA_LEGACY" ]; then
+        info "Legacy NVIDIA ($GPU_GEN) → nouveau (open, in-kernel, Wayland-friendly)..."
+        pac_retry -S --noconfirm --needed \
+            mesa lib32-mesa vulkan-nouveau lib32-vulkan-nouveau \
+            vulkan-icd-loader lib32-vulkan-icd-loader \
+            vulkan-mesa-layers lib32-vulkan-mesa-layers \
+            switcheroo-control \
+            || warn "Some nouveau/Vulkan packages failed — desktop should still work."
+        # Make absolutely sure nothing blacklists nouveau or forces the proprietary path.
+        sudo rm -f /etc/modprobe.d/no-nvidia.conf /etc/modprobe.d/niix-disable-nvidia.conf \
+                   /etc/modprobe.d/nouveau-blacklist.conf /etc/modules-load.d/nvidia.conf \
+                   /etc/modprobe.d/nvidia.conf 2>/dev/null || true
+        sudo systemctl enable switcheroo-control.service 2>/dev/null || true
+        log "Legacy NVIDIA configured for nouveau + PRIME offload (Wayland)"
+    else
+        info "Detecting and installing GPU drivers (CachyOS chwd)..."
+        pac_retry -S --noconfirm --needed chwd || true
+        if command -v chwd >/dev/null 2>&1; then
+            sudo chwd -a 0300 || warn "chwd autoconfigure reported issues (see 'sudo chwd --list')."
+            log "chwd GPU configuration complete"
+        else
+            warn "chwd unavailable from the CachyOS repo — GPU drivers not auto-configured."
+            warn "Run manually once online: sudo pacman -S chwd && sudo chwd -a 0300"
+        fi
+    fi
 else
     log "CachyOS kernel already installed"
 fi
@@ -2612,7 +2880,32 @@ if ! pacman -Q scx-scheds &>/dev/null; then
     fi
 fi
 
+# ── Create @clean bootable fallback subvolume ─────────────
+# Runs BEFORE the Limine update so the "clean state" menu entry is only ever
+# written when the @clean subvolume really exists. All btrfs/mount operations
+# need root — this script runs as the regular user, so sudo is mandatory here
+# (without it the mount fails silently and @clean is never created).
+info "Creating @clean Btrfs fallback snapshot..."
+CLEAN_OK=false
+MAPPER_DEV=$(findmnt -n --nofsroot -o SOURCE / | head -1)
+TMP_MNT=$(mktemp -d)
+if sudo mount -o subvol=/ "$MAPPER_DEV" "$TMP_MNT" 2>/dev/null; then
+    sudo btrfs subvolume show "$TMP_MNT/@clean" &>/dev/null \
+        && sudo btrfs subvolume delete "$TMP_MNT/@clean" 2>/dev/null
+    if sudo btrfs subvolume snapshot "$TMP_MNT/@" "$TMP_MNT/@clean"; then
+        CLEAN_OK=true
+        log "@clean snapshot created — bootable from Limine as 'NiiX Arch (clean state)'"
+    else
+        warn "@clean snapshot failed — run later: sudo niixarch-refresh-clean"
+    fi
+    sudo umount "$TMP_MNT"
+else
+    warn "Could not mount Btrfs top-level — @clean skipped, run: sudo niixarch-refresh-clean"
+fi
+rmdir "$TMP_MNT" 2>/dev/null || true
+
 # ── Update Limine for CachyOS + @clean ───────────────────
+LIMINE_UPDATED=false
 if [ -f /boot/vmlinuz-linux-cachyos ]; then
     info "Updating Limine config..."
     LIMINE_CONF=""
@@ -2623,16 +2916,38 @@ if [ -f /boot/vmlinuz-linux-cachyos ]; then
     if [ -n "$LIMINE_CONF" ]; then
         CURRENT_CMDLINE=$(grep -m1 "cmdline:" "$LIMINE_CONF" | sed 's/.*cmdline: //')
         NEW_CMDLINE=$(echo "$CURRENT_CMDLINE" | sed 's|cryptdevice=UUID=\([^:]*\):\([^ ]*\)|rd.luks.name=\1=\2|')
-        CLEAN_CMDLINE=$(echo "$NEW_CMDLINE" | sed 's/rootflags=subvol=@\b/rootflags=subvol=@clean/')
+        # NOTE: 'subvol=@\b' can never match '@' followed by a space (\b needs a
+        # word char after '@'), so the old pattern silently left the clean entry
+        # booting the normal @ subvolume. Match '@' followed by a space or EOL.
+        CLEAN_CMDLINE=$(echo "$NEW_CMDLINE" | sed -E 's/rootflags=subvol=@( |$)/rootflags=subvol=@clean\1/')
 
         if [ "$IS_DUALBOOT" = "true" ]; then
             WIN_ENTRY="/Windows Boot Manager
     protocol: efi
     path: boot():/EFI/Microsoft/Boot/bootmgfw.efi
+
 "
         else
             WIN_ENTRY=""
         fi
+
+        # Only offer the clean-state entry if the snapshot actually exists —
+        # otherwise selecting it would fail to mount root and drop to emergency.
+        CLEAN_ENTRY=""
+        if [ "$CLEAN_OK" = "true" ]; then
+            CLEAN_ENTRY="
+
+/NiiX Arch (clean state)
+    protocol: linux
+    path: boot():/vmlinuz-linux-cachyos
+    cmdline: $CLEAN_CMDLINE
+    module_path: boot():/initramfs-linux-cachyos.img"
+        fi
+
+        # default_entry is 1-based: with the Windows entry present, NiiX Arch is
+        # entry 2; in single-boot it is entry 1.
+        DEFAULT_ENTRY=1
+        [ -n "$WIN_ENTRY" ] && DEFAULT_ENTRY=2
 
         TMPFILE=$(mktemp)
         cat > "$TMPFILE" <<LIMEOF
@@ -2640,29 +2955,28 @@ timeout: 5
 interface_branding: NiiX Arch
 interface_branding_colour: 6
 interface_help_hidden: yes
-default_entry: 1
+default_entry: $DEFAULT_ENTRY
 
 ${WIN_ENTRY}/NiiX Arch
     protocol: linux
     path: boot():/vmlinuz-linux-cachyos
     cmdline: $NEW_CMDLINE
-    module_path: boot():/initramfs-linux-cachyos.img
-
-/NiiX Arch (clean state)
-    protocol: linux
-    path: boot():/vmlinuz-linux-cachyos
-    cmdline: $CLEAN_CMDLINE
-    module_path: boot():/initramfs-linux-cachyos.img
+    module_path: boot():/initramfs-linux-cachyos.img${CLEAN_ENTRY}
 LIMEOF
-        sudo cp "$TMPFILE" /boot/EFI/limine/limine.cfg 2>/dev/null || true
-        sudo cp "$TMPFILE" /boot/EFI/limine/limine.conf 2>/dev/null || true
-        sudo cp "$TMPFILE" /boot/EFI/BOOT/limine.cfg 2>/dev/null || true
-        sudo cp "$TMPFILE" /boot/EFI/BOOT/limine.conf 2>/dev/null || true
-        sudo cp "$TMPFILE" /boot/limine/limine.cfg 2>/dev/null || true
-        sudo cp "$TMPFILE" /boot/limine/limine.conf 2>/dev/null || true
-        sudo cp "$TMPFILE" /boot/limine.cfg 2>/dev/null || true
+        copied=0
+        for dst in /boot/EFI/limine/limine.cfg /boot/EFI/limine/limine.conf \
+                   /boot/EFI/BOOT/limine.cfg   /boot/EFI/BOOT/limine.conf \
+                   /boot/limine/limine.cfg     /boot/limine/limine.conf \
+                   /boot/limine.cfg; do
+            sudo cp "$TMPFILE" "$dst" 2>/dev/null && copied=$(( copied + 1 ))
+        done
         rm "$TMPFILE"
-        log "Limine updated — CachyOS kernel · @clean fallback added"
+        if [ "$copied" -gt 0 ]; then
+            LIMINE_UPDATED=true
+            log "Limine updated ($copied locations) — CachyOS kernel$([ "$CLEAN_OK" = "true" ] && echo ' · @clean fallback')"
+        else
+            warn "Could not write any Limine config — update Limine manually before rebooting"
+        fi
     else
         warn "Could not find limine config — update Limine manually"
     fi
@@ -2671,25 +2985,19 @@ else
 fi
 
 # ── Remove stock linux kernel ─────────────────────────────
-info "Removing stock linux kernel..."
-sudo pacman -Rns --noconfirm linux linux-headers 2>/dev/null \
-    && log "Stock kernel removed — CachyOS only" \
-    || warn "Could not remove stock kernel — run: sudo pacman -Rns linux linux-headers"
-
-# ── Create @clean bootable fallback subvolume ─────────────
-info "Creating @clean Btrfs fallback snapshot..."
-MAPPER_DEV=$(findmnt -n --nofsroot -o SOURCE / | head -1)
-TMP_MNT=$(mktemp -d)
-if mount -o subvol=/ "$MAPPER_DEV" "$TMP_MNT" 2>/dev/null; then
-    btrfs subvolume show "$TMP_MNT/@clean" &>/dev/null \
-        && btrfs subvolume delete "$TMP_MNT/@clean" 2>/dev/null
-    btrfs subvolume snapshot "$TMP_MNT/@" "$TMP_MNT/@clean"
-    umount "$TMP_MNT"
-    log "@clean snapshot created — boot it from Limine as 'NiiX Arch (clean state)'"
+# Only safe once BOTH are true: the CachyOS kernel is installed AND Limine now
+# points at it. Removing 'linux' unconditionally could leave the machine with
+# no kernel at all right before the automatic reboot below.
+if pacman -Q linux-cachyos &>/dev/null \
+    && [ -f /boot/vmlinuz-linux-cachyos ] \
+    && [ "$LIMINE_UPDATED" = "true" ]; then
+    info "Removing stock linux kernel..."
+    sudo pacman -Rns --noconfirm linux linux-headers 2>/dev/null \
+        && log "Stock kernel removed — CachyOS only" \
+        || warn "Could not remove stock kernel — run: sudo pacman -Rns linux linux-headers"
 else
-    warn "Could not mount Btrfs top-level — @clean skipped, run: sudo niixarch-refresh-clean"
+    warn "Keeping the stock linux kernel (CachyOS kernel or Limine update not confirmed)."
 fi
-rmdir "$TMP_MNT" 2>/dev/null || true
 
 # ── niixarch-refresh-clean helper ────────────────────────
 sudo tee /usr/local/bin/niixarch-refresh-clean > /dev/null <<'REFRESHEOF'
@@ -2735,14 +3043,30 @@ aur_install ananicy-rules-git || true
 aur_install heroic-games-launcher-bin || true
 aur_install protonup-qt || true
 aur_install helium-browser-bin || true
-[[ "$GPU_VENDOR" == "nvidia" ]] && aur_install gwe || true
+# ddterm: Wayland-native drop-down terminal (GNOME Shell extension), replaces Yakuake.
+if aur_install gnome-shell-extension-ddterm; then
+    gnome-extensions enable ddterm@amezin.github.com 2>/dev/null || true
+    # Bind the drop-down toggle to BOTH F12 and Ctrl+Alt+T.
+    dconf write /com/github/amezin/ddterm/ddterm-toggle-hotkey "['F12', '<Control><Alt>t']" 2>/dev/null || true
+    dconf write /com/github/amezin/ddterm/window-above true 2>/dev/null || true
+    dconf write /com/github/amezin/ddterm/hide-when-focus-lost false 2>/dev/null || true
+    log "ddterm drop-down terminal installed (F12 / Ctrl+Alt+T)"
+else
+    warn "ddterm failed to install from the AUR — drop-down terminal unavailable."
+fi
 log "AUR packages done"
+
+# NVIDIA drivers (modern + legacy 580xx/470xx), Optimus/PRIME, switcheroo-control and
+# nvidia-prime are all handled earlier by CachyOS hardware detection (chwd) — no custom
+# NVIDIA driver logic here anymore.
 
 # ── Flatpak ───────────────────────────────────────────────
 info "Installing Flatpak apps..."
-flatpak remote-add --if-not-exists flathub \
-    https://dl.flathub.org/repo/flathub.flatpakrepo
-flatpak install -y flathub com.stremio.Stremio || true
+# sudo: a system-wide flatpak install from a user session pops an interactive
+# polkit password dialog, which stalls the unattended first-boot flow.
+sudo flatpak remote-add --if-not-exists flathub \
+    https://dl.flathub.org/repo/flathub.flatpakrepo || warn "Could not add Flathub remote"
+sudo flatpak install -y flathub com.stremio.Stremio || true
 log "Flatpak apps installed"
 
 # ── GE-Proton ─────────────────────────────────────────────
@@ -2787,7 +3111,7 @@ sudo tee /etc/dconf/db/local.d/00-niixarch-dash > /dev/null << 'DCONFEOF'
 [org/gnome/shell]
 favorite-apps=['org.gnome.Nautilus.desktop', 'org.gnome.Terminal.desktop', 'helium.desktop', 'net.lutris.Lutris.desktop', 'steam.desktop', 'heroic.desktop', 'com.stremio.Stremio.desktop']
 disable-user-extensions=false
-enabled-extensions=['appindicatorsupport@rgcjonas.gmail.com', 'dash-to-panel@jderose9.github.com', 'arcmenu@arcmenu.com', 'screen-rotate@shyzus.github.io']
+enabled-extensions=['appindicatorsupport@rgcjonas.gmail.com', 'dash-to-panel@jderose9.github.com', 'arcmenu@arcmenu.com', 'screen-rotate@shyzus.github.io', 'ddterm@amezin.github.com']
 
 [org/gnome/desktop/interface]
 color-scheme='prefer-dark'
@@ -2879,13 +3203,8 @@ finish() {
     echo -e "  ${GREEN}installation complete!${NC}"
     echo -e "  ${PINK}────────────────────────────────────────────────────────${NC}"
     echo
-    echo -e "  ${PINK}▸${NC}  Run these commands to unmount and reboot:"
-    echo
-    echo -e "      ${YELLOW}umount -R /mnt${NC}"
-    echo -e "      ${YELLOW}cryptsetup close $MAPPER${NC}"
-    echo -e "      ${YELLOW}reboot${NC}"
-    echo
-    echo -e "  ${DIM}Remove the USB when the screen goes blank.${NC}"
+    echo -e "  ${DIM}Logs are saved next, then you'll be prompted to reboot.${NC}"
+    echo -e "  ${DIM}Remove the USB when the screen goes blank after reboot.${NC}"
     echo
     echo -e "  ${PINK}── At the Limine menu ────────────────────────────${NC}"
     echo
@@ -3038,6 +3357,9 @@ select_single_drive() {
     echo
     ask "Select drive to install on (will be COMPLETELY WIPED):"
     read -rp "  > " DRIVE_CHOICE
+    # Strict numeric check: bash treats a non-numeric index as a variable name
+    # that evaluates to 0, which would silently select the FIRST drive.
+    [[ "$DRIVE_CHOICE" =~ ^[0-9]+$ ]] || err "Invalid selection: $DRIVE_CHOICE"
 
     local chosen="${drive_list[$DRIVE_CHOICE]:-}"
     [[ -n "$chosen" ]] || err "Invalid selection: $DRIVE_CHOICE"
@@ -3493,6 +3815,7 @@ copy_logs_to_usb() {
         ask "Copy logs to which USB? Enter the number (or 's' to skip):"
         read -rp "  > " USB_CHOICE
         [[ "$USB_CHOICE" == "s" ]] && { info "Skipped."; return; }
+        [[ "$USB_CHOICE" =~ ^[0-9]+$ ]] || { warn "Invalid choice. Skipped."; return; }
         USB_TARGET="${USB_PARTS[$USB_CHOICE]:-}"
         [[ -n "$USB_TARGET" ]] || { warn "Invalid choice. Skipped."; return; }
     fi
@@ -3530,3 +3853,13 @@ echo -e "  ${CYAN}Log file:${NC}"
 echo -e "    Live ISO:    ${YELLOW}${LOGFILE}${NC}"
 echo -e "    Installed:   ${YELLOW}/var/log/niixarch-install.log${NC}"
 echo
+
+# ── Reboot on Enter ───────────────────────────────────────
+echo -e "  ${PINK}────────────────────────────────────────────────────────${NC}"
+read -rp "$(echo -e "  ${GREEN}Press Enter to reboot${NC} ${DIM}(or Ctrl+C to stay at the shell)${NC}  ")" _
+echo -e "  ${CYAN}Unmounting and rebooting...${NC}"
+umount -R /mnt 2>/dev/null || true
+swapoff -a 2>/dev/null || true
+cryptsetup close "$MAPPER" 2>/dev/null || true
+sync
+reboot
