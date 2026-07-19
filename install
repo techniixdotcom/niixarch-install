@@ -3,7 +3,7 @@
 #  NiiX Arch Installer  //  arch.niiix.net
 #  Modes   : Dual-boot (Arch + Windows)  |  Single-boot (bare drive)
 #  Stack   : LUKS2 · Btrfs · Limine · CachyOS · GNOME (customised)
-#  Desktop : dash-to-panel + ArcMenu + auto-rotate
+#  Desktop : dash-to-panel + ArcMenu + auto-rotate 
 #  Extras  : Auto GPU drivers · Gaming (Steam/Lutris/Heroic)
 #
 #  Requirements:
@@ -64,7 +64,7 @@ LOCALE="en_GB.UTF-8"
 MIRROR_COUNTRY="Switzerland"
 MAPPER="cryptroot"
 BTRFS_OPTS="noatime,compress=zstd,space_cache=v2"
-NIIX_BUILD="2026-07-19-r10"  # bump on every change — printed on the banner to verify freshness
+NIIX_BUILD="2026-07-19-r13"  # bump on every change — printed on the banner to verify freshness
 
 # ── Install mode ─────────────────────────────────────────────
 INSTALL_MODE=""    # "dualboot" | "singleboot"
@@ -1224,13 +1224,18 @@ configure_system() {
 
     # (mkinitcpio.conf written and rebuilt by rebuild_initramfs after all packages)
 
-    # ── Sysctl tuning (RAM-adaptive) ─────────────────────────
-    local swappiness=10
-    [[ "$MEM_TOTAL_GB" -lt 24 ]] && swappiness=30
-    [[ "$MEM_TOTAL_GB" -lt 12 ]] && swappiness=60
+    # ── Sysctl tuning ────────────────────────────────────────
+    # Swap here is ZRAM (compressed RAM), not disk — so classic low-swappiness
+    # tuning is inverted: it makes the kernel drop useful page cache instead of
+    # using nearly-free compressed memory. swappiness=100 matches CachyOS's
+    # shipped default for this exact stack. page-cluster=0 reads one page per
+    # fault instead of eight — right for RAM-backed swap, a legacy of spinning
+    # disks otherwise.
+    local swappiness=100
 
     cat > /mnt/etc/sysctl.d/99-niixarch.conf <<SYSEOF
 vm.swappiness=$swappiness
+vm.page-cluster=0
 vm.vfs_cache_pressure=50
 vm.compaction_proactiveness=0
 vm.watermark_boost_factor=0
@@ -1243,7 +1248,7 @@ net.ipv4.tcp_congestion_control=bbr
 net.ipv4.ip_forward=1
 net.ipv6.conf.all.forwarding=1
 SYSEOF
-    log "Sysctl tuned (swappiness=$swappiness for ${MEM_TOTAL_GB}GB RAM; max_map_count + split-lock + IP-forward for gaming/hotspot)"
+    log "Sysctl tuned (ZRAM-aware swap: swappiness=$swappiness + page-cluster=0; max_map_count + split-lock + IP-forward for gaming/hotspot)"
 
     # ── Transparent hugepages ────────────────────────────────
     mkdir -p /mnt/etc/tmpfiles.d
@@ -1595,6 +1600,21 @@ systemctl enable systemd-resolved
 # rm -f first — ln -sf will NOT overwrite a regular file on all kernels.
 rm -f /etc/resolv.conf
 ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+
+# ── Bluetooth — BlueZ daemon configuration ────────────────
+# Experimental=true  → battery percentage of headsets shows up in GNOME.
+# ControllerMode=dual → classic + LE on the same adapter (LE Audio headsets).
+# FastConnectable    → quicker reconnect when a paired headset powers on.
+# AutoEnable         → adapter is powered at boot; no "turn BT on every boot".
+cat > /etc/bluetooth/main.conf <<'BTMAINEOF'
+[General]
+ControllerMode = dual
+FastConnectable = true
+Experimental = true
+
+[Policy]
+AutoEnable = true
+BTMAINEOF
 
 # ── Optional services — || true so a missing package can't kill the chroot ──
 systemctl enable ananicy-cpp           2>/dev/null || true
@@ -2473,15 +2493,29 @@ start = notify-send "GameMode" "Gaming optimizations ON"
 end = notify-send "GameMode" "Gaming optimizations OFF"
 GMEOF
 
-# ── Bluetooth A2DP fix ────────────────────────────────────
+# ── Bluetooth headset audio (WirePlumber) ─────────────────
+# Roles and codecs are deliberately NOT restricted here. WirePlumber's defaults
+# already enable A2DP (music) + HFP (microphone) + BAP (LE Audio) and every
+# compiled codec (aptX, aptX-HD, LDAC, AAC, LC3, ...). The old config forced
+# A2DP-only roles — which silently disabled every headset microphone — and a
+# codec whitelist that blocked aptX and LC3 headsets down to plain SBC.
+# What we DO set:
+#   enable-msbc      → 16 kHz wideband mic instead of 8 kHz telephone quality
+#   enable-sbc-xq    → higher-bitrate SBC for headsets without a better codec
+#   enable-hw-volume → volume keys control the headset's own amplifier
+#   auto-connect     → bring up both music and mic profiles on connect
 mkdir -p "$HOME/.config/wireplumber/wireplumber.conf.d"
-cat > "$HOME/.config/wireplumber/wireplumber.conf.d/51-bluetooth-fix.conf" <<'BTEOF'
+cat > "$HOME/.config/wireplumber/wireplumber.conf.d/51-bluetooth-headsets.conf" <<'BTEOF'
 monitor.bluez.properties = {
-  bluez5.roles = [ a2dp_sink a2dp_source ]
-  bluez5.codecs = [ sbc sbc_xq aac ldac ]
-  bluez5.auto-connect = [ a2dp_sink ]
+  bluez5.enable-msbc = true
+  bluez5.enable-sbc-xq = true
+  bluez5.enable-hw-volume = true
+  bluez5.hfphsp-backend = "native"
+  bluez5.auto-connect = [ hfp_hf hsp_hs a2dp_sink ]
 }
 BTEOF
+# Remove the old restrictive config if this is a re-run
+rm -f "$HOME/.config/wireplumber/wireplumber.conf.d/51-bluetooth-fix.conf"
 
 # ── fastfetch on terminal open ────────────────────────────
 grep -qx 'fastfetch' "$HOME/.bashrc" 2>/dev/null || echo 'fastfetch' >> "$HOME/.bashrc"
@@ -2499,20 +2533,55 @@ if [ -x /usr/bin/steam ]; then
     info "Configuring Steam warm-start and first-launch notice..."
     pac_retry -S --noconfirm --needed zenity libnotify || true
 
+    # ── Per-hardware GPU environment for Steam ────────────
+    # On hybrid systems, Steam (and therefore every game it launches) is started
+    # with the PRIME offload environment for the detected driver stack, so games
+    # render on the dGPU instead of the APU/iGPU with zero per-game setup.
+    # Written as a sourceable file so users can inspect/edit/disable it.
+    # Deliberately skipped on the nouveau path (legacy NVIDIA): running the Steam
+    # client on the nouveau dGPU leaves it tray-only with no window (see the GPU
+    # section above) — per-game "DRI_PRIME=1 %command%" is the right tool there.
+    sudo mkdir -p /etc/niix
+    if [ "$IS_HYBRID" = "true" ] && [ -z "$NVIDIA_LEGACY" ]; then
+        if [ "$OFFLOAD_MODE" = "nvidia" ]; then
+            sudo tee /etc/niix/steam-env > /dev/null <<'SENVEOF'
+# NiiX: PRIME render offload for Steam and all games it launches (NVIDIA proprietary).
+# Sourced by /usr/local/bin/steam. Delete this file to disable.
+export __NV_PRIME_RENDER_OFFLOAD=1
+export __GLX_VENDOR_LIBRARY_NAME=nvidia
+export __VK_LAYER_NV_optimus=NVIDIA_only
+SENVEOF
+            log "Steam: games will render on the NVIDIA dGPU (PRIME offload)"
+        else
+            sudo tee /etc/niix/steam-env > /dev/null <<'SENVEOF'
+# NiiX: PRIME render offload for Steam and all games it launches (Mesa: AMD/Intel dGPU).
+# Sourced by /usr/local/bin/steam. Delete this file to disable.
+export DRI_PRIME=1
+SENVEOF
+            log "Steam: games will render on the dGPU (DRI_PRIME offload)"
+        fi
+    else
+        sudo rm -f /etc/niix/steam-env
+    fi
+
     mkdir -p "$HOME/.config/autostart"
     cat > "$HOME/.config/autostart/niix-steam-warmstart.desktop" <<'STEAMAUTOEOF'
 [Desktop Entry]
 Type=Application
 Name=Steam (pre-load, minimized)
 Comment=Added by NiiX first-boot — delete this file to disable
-Exec=sh -c 'sleep 30; exec /usr/bin/steam -silent'
+Exec=sh -c 'sleep 30; exec /usr/local/bin/steam -silent'
 X-GNOME-Autostart-enabled=true
 STEAMAUTOEOF
 
     sudo tee /usr/local/bin/steam > /dev/null <<'STEAMWRAPEOF'
 #!/bin/bash
-# NiiX wrapper: one-time first-launch notice, then hands off to the real Steam.
+# NiiX wrapper: applies the per-hardware GPU environment, shows a one-time
+# first-launch notice, then hands off to the real Steam.
 # Remove with: sudo rm /usr/local/bin/steam ~/.local/share/applications/steam.desktop
+# GPU env applies to every entry path (icon, terminal, warm-start) so games
+# always inherit it, whichever instance ends up serving the launch.
+[ -f /etc/niix/steam-env ] && . /etc/niix/steam-env
 for arg in "$@"; do
     [ "$arg" = "-silent" ] && exec /usr/bin/steam "$@"
 done
@@ -2524,9 +2593,11 @@ if [ ! -e "$FLAG" ]; then
 
 This is normal: Steam ships with its own built-in browser that has to start from cold each time it launches.
 
+One-time setup for the best experience: in Steam go to Settings → Compatibility, turn on \"Enable Steam Play for all other titles\", and pick Proton-CachyOS (already installed; GE-Proton is there too as an alternative) as the default tool. Steam will restart once.
+
 Tip: NiiX pre-loads Steam in the background shortly after each login, so future launches are much faster."
     if command -v zenity >/dev/null 2>&1; then
-        zenity --info --title="Steam is starting..." --width=380 --text="$MSG" &
+        zenity --info --title="Steam is starting..." --width=420 --text="$MSG" &
     elif command -v notify-send >/dev/null 2>&1; then
         notify-send -u normal "Steam is starting..." "$MSG" &
     fi
@@ -2589,7 +2660,7 @@ echo -e "${GREEN}  ╚═╝  ╚═══╝╚═╝╚═╝╚═╝  ╚═
 echo
 echo -e "  ${WHITE}${BOLD}First-Boot Setup${NC}"
 echo -e "  ${PINK}────────────────────────────────────────────────${NC}"
-echo -e "  ${CYAN}·${NC}  CachyOS kernel · AUR packages · GE-Proton · NiiX desktop · wallpaper"
+echo -e "  ${CYAN}·${NC}  CachyOS kernel · AUR packages · Proton-CachyOS · NiiX desktop · wallpaper"
 echo
 
 # ── Wait for network ──────────────────────────────────────
@@ -2740,7 +2811,7 @@ dconf load /org/gnome/shell/ <<'SHELLD'
 [/]
 disable-user-extensions=false
 enabled-extensions=['appindicatorsupport@rgcjonas.gmail.com', 'dash-to-panel@jderose9.github.com', 'arcmenu@arcmenu.com', 'screen-rotate@shyzus.github.io', 'ddterm@amezin.github.com']
-favorite-apps=['org.gnome.Nautilus.desktop', 'org.gnome.Terminal.desktop', 'helium.desktop', 'net.lutris.Lutris.desktop', 'steam.desktop', 'heroic.desktop', 'com.stremio.Stremio.desktop']
+favorite-apps=['org.gnome.Nautilus.desktop', 'helium.desktop', 'net.lutris.Lutris.desktop', 'steam.desktop', 'heroic.desktop', 'com.stremio.Stremio.desktop']
 SHELLD
 
 log "NiiX desktop configured (fully applies after the reboot below)"
@@ -3069,6 +3140,18 @@ sudo flatpak remote-add --if-not-exists flathub \
 sudo flatpak install -y flathub com.stremio.Stremio || true
 log "Flatpak apps installed"
 
+# ── Proton-CachyOS (recommended default) ─────────────────
+# From the CachyOS repos enabled above: Proton 11 base with NTSync enabled by
+# default (the ntsync kernel module is already loaded by the installer), plus
+# per-game upscaler DLL upgrades (PROTON_FSR4_UPGRADE / PROTON_DLSS_UPGRADE /
+# PROTON_XESS_UPGRADE) and winewayland improvements. umu-launcher lets Lutris
+# and Heroic use the same Proton builds. Fails gracefully if the CachyOS repos
+# never came up — GE-Proton below remains the fallback.
+info "Installing Proton-CachyOS + umu-launcher..."
+pac_retry -S --noconfirm --needed proton-cachyos umu-launcher \
+    && log "Proton-CachyOS installed — recommended default in Steam → Settings → Compatibility" \
+    || warn "Proton-CachyOS not available (CachyOS repos missing?) — use GE-Proton instead"
+
 # ── GE-Proton ─────────────────────────────────────────────
 info "Installing latest GE-Proton..."
 GEPROTON_TAG=$(curl -s "https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases/latest" | grep tag_name | cut -d\" -f4)
@@ -3109,7 +3192,7 @@ if ! grep -q "system-db:local" /etc/dconf/profile/user 2>/dev/null; then
 fi
 sudo tee /etc/dconf/db/local.d/00-niixarch-dash > /dev/null << 'DCONFEOF'
 [org/gnome/shell]
-favorite-apps=['org.gnome.Nautilus.desktop', 'org.gnome.Terminal.desktop', 'helium.desktop', 'net.lutris.Lutris.desktop', 'steam.desktop', 'heroic.desktop', 'com.stremio.Stremio.desktop']
+favorite-apps=['org.gnome.Nautilus.desktop', 'helium.desktop', 'net.lutris.Lutris.desktop', 'steam.desktop', 'heroic.desktop', 'com.stremio.Stremio.desktop']
 disable-user-extensions=false
 enabled-extensions=['appindicatorsupport@rgcjonas.gmail.com', 'dash-to-panel@jderose9.github.com', 'arcmenu@arcmenu.com', 'screen-rotate@shyzus.github.io', 'ddterm@amezin.github.com']
 
@@ -3119,7 +3202,7 @@ accent-color='pink'
 icon-theme='NiiX'
 DCONFEOF
 sudo dconf update 2>/dev/null \
-    && log "Dash pinned: Nautilus · Terminal · Helium · Lutris · Steam · Heroic · Stremio" \
+    && log "Dash pinned: Nautilus · Helium · Lutris · Steam · Heroic · Stremio" \
     || warn "dconf update failed — Dash pinning may not apply"
 
 # ── Cleanup ───────────────────────────────────────────────
@@ -3130,7 +3213,9 @@ sudo touch /var/lib/niixarch-firstboot-done
 echo ""
 echo -e "  ${GREEN}✓${NC}  ${WHITE}${BOLD}First-boot setup complete!${NC}"
 echo -e "  ${PINK}────────────────────────────────────────────────${NC}"
-echo -e "  ${CYAN}·${NC}  Steam launch options: ${GREEN}gamemoderun mangohud %command%${NC}"
+echo -e "  ${CYAN}·${NC}  Steam: dGPU is automatic on hybrid systems · optional extras: ${GREEN}gamemoderun mangohud %command%${NC}"
+echo -e "  ${CYAN}·${NC}  Steam one-time: Settings → Compatibility → Steam Play for all titles → ${GREEN}Proton-CachyOS${NC}"
+echo -e "  ${CYAN}·${NC}  FreeSync/G-Sync monitor? Settings → Displays → enable ${GREEN}Variable Refresh Rate${NC}"
 echo -e "  ${CYAN}·${NC}  Phone-friendly Wi-Fi hotspot: ${GREEN}niix-hotspot start${NC}"
 echo -e "  ${CYAN}·${NC}  Refresh clean snapshot: ${GREEN}sudo niixarch-refresh-clean${NC}"
 echo -e "  ${CYAN}·${NC}  Log saved to: $LOG"
