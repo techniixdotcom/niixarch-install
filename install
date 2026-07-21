@@ -1,9 +1,9 @@
 #!/bin/bash
 # ============================================================
-#  NiiX Arch Installer  //  arch.niiix.net
+#  NiiXArch Installer  //  niixa.org
 #  Modes   : Dual-boot (Arch + Windows)  |  Single-boot (bare drive)
-#  Stack   : LUKS2 · Btrfs · Limine · CachyOS · GNOME (customised)
-#  Desktop : dash-to-panel + ArcMenu + auto-rotate 
+#  Stack   : LUKS2 · Btrfs · Limine · CachyOS Kernel· GNOME (customised)
+#  Desktop : dash-to-panel + ArcMenu + auto-rotate
 #  Extras  : Auto GPU drivers · Gaming (Steam/Lutris/Heroic)
 #
 #  Requirements:
@@ -25,7 +25,7 @@
 #    Swap       : ZRAM (zstd, auto-sized)
 #
 #  HOW TO RUN from the Arch ISO:
-#    bash <(curl -s https://arch.niiix.net/install | tr -d '\r')
+#    bash <(curl -s https://niixa.org/install | tr -d '\r')
 # ============================================================
 
 set -uo pipefail
@@ -34,7 +34,7 @@ set -uo pipefail
 LOGFILE="/root/niixarch-install-$(date +%Y%m%d-%H%M%S).log"
 exec > >(tee -a "$LOGFILE") 2>&1
 
-# ── Colours — matched to arch.niiix.net palette ─────────────
+# ── Colours — matched to niixa.org palette ─────────────
 #   GREEN  = neon green  #0aff9e  (256-colour: 118)
 #   PINK   = neon pink   #ff0a6c  (256-colour: 205)
 GREEN='\033[38;5;118m'
@@ -64,7 +64,7 @@ LOCALE="en_GB.UTF-8"
 MIRROR_COUNTRY="Switzerland"
 MAPPER="cryptroot"
 BTRFS_OPTS="noatime,compress=zstd,space_cache=v2"
-NIIX_BUILD="2026-07-19-r13"  # bump on every change — printed on the banner to verify freshness
+NIIX_BUILD="2026-07-21-r17"  # bump on every change — printed on the banner to verify freshness
 
 # ── Install mode ─────────────────────────────────────────────
 INSTALL_MODE=""    # "dualboot" | "singleboot"
@@ -178,13 +178,13 @@ is_removable() {
 banner() {
     clear
     echo
-    # NiiX in neon green, Arch in neon pink — mirrors the website logo split
-    echo -e "${GREEN}  ███╗   ██╗██╗██╗██╗  ██╗ █████╗ ${PINK}██████╗  ██████╗██╗  ██╗${NC}"
-    echo -e "${GREEN}  ████╗  ██║██║██║╚██╗██╔╝██╔══██╗${PINK}██╔══██╗██╔════╝██║  ██║${NC}"
-    echo -e "${GREEN}  ██╔██╗ ██║██║██║ ╚███╔╝ ███████║${PINK}██████╔╝██║     ███████║${NC}"
-    echo -e "${GREEN}  ██║╚██╗██║██║██║ ██╔██╗ ██╔══██║${PINK}██╔══██╗██║     ██╔══██║${NC}"
-    echo -e "${GREEN}  ██║ ╚████║██║██║██╔╝ ██╗██║  ██║${PINK}██║  ██║╚██████╗██║  ██║${NC}"
-    echo -e "${GREEN}  ╚═╝  ╚═══╝╚═╝╚═╝╚═╝  ╚═╝╚═╝  ╚═╝${PINK}╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝${NC}"
+    # "niixa" in neon green, "OS" in neon pink — mirrors the website wordmark
+    echo -e "${GREEN}  ███╗   ██╗██╗██╗██╗  ██╗ █████╗ ${PINK} ██████╗ ███████╗${NC}"
+    echo -e "${GREEN}  ████╗  ██║██║██║╚██╗██╔╝██╔══██╗${PINK}██╔═══██╗██╔════╝${NC}"
+    echo -e "${GREEN}  ██╔██╗ ██║██║██║ ╚███╔╝ ███████║${PINK}██║   ██║███████╗${NC}"
+    echo -e "${GREEN}  ██║╚██╗██║██║██║ ██╔██╗ ██╔══██║${PINK}██║   ██║╚════██║${NC}"
+    echo -e "${GREEN}  ██║ ╚████║██║██║██╔╝ ██╗██║  ██║${PINK}╚██████╔╝███████║${NC}"
+    echo -e "${GREEN}  ╚═╝  ╚═══╝╚═╝╚═╝╚═╝  ╚═╝╚═╝  ╚═╝${PINK} ╚═════╝ ╚══════╝${NC}"
     echo
     echo -e "  ${DIM}luks2 · cachyos · limine · btrfs · gnome  //  installer${NC}"
     echo -e "  ${GREEN}▸ build ${NIIX_BUILD}${NC}   ${DIM}(if this line is missing/old, you're running a stale script)${NC}"
@@ -398,13 +398,6 @@ check_prereqs() {
     log "Keyboard: $KEYMAP (default — will be updated after layout selection)"
     log "All checks passed"
 }
-
-# ── Install count ──────────────────────────────────────
-    _hx() { python3 -c "import sys; print(bytes.fromhex(sys.argv[1]).decode())" "$1" 2>/dev/null; }
-    _u="$(_hx 68747470733a2f2f617263682e6e696969782e6e65742f636f756e7465722e706870)"
-    _q="$(_hx 616374696f6e3d686974267365637265743d)$(_hx 65363937356131396231653736333865666662626130643333663836326532656431626230666463)"
-    curl -sf "${_u}?${_q}" --max-time 3 --retry 1 -o /dev/null 2>/dev/null &
-    unset -f _hx; unset _u _q
 
 # ── Step 1: Auto-detect EFI partition (internal drives only) ─
 detect_efi() {
@@ -2531,7 +2524,38 @@ grep -qx 'fastfetch' "$HOME/.bashrc" 2>/dev/null || echo 'fastfetch' >> "$HOME/.
 #     notice only ever appears on the user's own first real launch.
 if [ -x /usr/bin/steam ]; then
     info "Configuring Steam warm-start and first-launch notice..."
-    pac_retry -S --noconfirm --needed zenity libnotify || true
+    pac_retry -S --noconfirm --needed zenity libnotify vulkan-tools || true
+
+    # ── Steam UI GPU-conformance workaround (auto-detected) ──
+    # Brand-new GPUs (e.g. RDNA 4 / RX 9000) whose Mesa/RADV driver still reports
+    # itself non-conformant crash steamwebhelper's Chromium GPU process in a loop
+    # — the tray icon appears but no window ever paints. -cef-disable-gpu renders
+    # ONLY Steam's UI on CPU; games are completely unaffected (they use Vulkan via
+    # Proton as normal). Two independent signals; if either fires, apply it:
+    #   1. fast-path  — GPU_GEN is a known-too-new generation (rdna4)
+    #   2. runtime probe — the actually-installed Vulkan driver reports a
+    #      non-conformant (0.0.0.0) conformanceVersion for the GPU
+    # Self-correcting: once Mesa matures and the driver reports conformant, a
+    # future reinstall's probe won't match and the flag won't be applied.
+    _needs_cef_workaround() {
+        case "$GPU_GEN" in rdna4) return 0 ;; esac
+        if command -v vulkaninfo >/dev/null 2>&1; then
+            vulkaninfo 2>/dev/null \
+                | grep -iE "conformanceVersion" \
+                | grep -qE "0\.0\.0\.0" && return 0
+        fi
+        return 1
+    }
+    mkdir -p "$HOME/.local/share/Steam"
+    if _needs_cef_workaround; then
+        # Append idempotently — never clobber other flags the user may have added.
+        touch "$HOME/.local/share/Steam/steam_dev.cfg"
+        grep -qxF -- '-cef-disable-gpu' "$HOME/.local/share/Steam/steam_dev.cfg" \
+            || echo '-cef-disable-gpu' >> "$HOME/.local/share/Steam/steam_dev.cfg"
+        log "Steam: UI GPU disabled (new-GPU driver not yet conformant) — games unaffected"
+    else
+        log "Steam: GPU UI left enabled (driver reports conformant)"
+    fi
 
     # ── Per-hardware GPU environment for Steam ────────────
     # On hybrid systems, Steam (and therefore every game it launches) is started
@@ -2570,7 +2594,7 @@ SENVEOF
 Type=Application
 Name=Steam (pre-load, minimized)
 Comment=Added by NiiX first-boot — delete this file to disable
-Exec=sh -c 'sleep 30; exec /usr/local/bin/steam -silent'
+Exec=sh -c 'sleep 30; exec /usr/local/bin/steam -silent >/dev/null 2>&1'
 X-GNOME-Autostart-enabled=true
 STEAMAUTOEOF
 
@@ -2651,12 +2675,12 @@ log "Offline config done"
 # ════════════════════════════════════════════════════════
 
 echo
-echo -e "${GREEN}  ███╗   ██╗██╗██╗██╗  ██╗ █████╗ ${PINK}██████╗  ██████╗██╗  ██╗${NC}"
-echo -e "${GREEN}  ████╗  ██║██║██║╚██╗██╔╝██╔══██╗${PINK}██╔══██╗██╔════╝██║  ██║${NC}"
-echo -e "${GREEN}  ██╔██╗ ██║██║██║ ╚███╔╝ ███████║${PINK}██████╔╝██║     ███████║${NC}"
-echo -e "${GREEN}  ██║╚██╗██║██║██║ ██╔██╗ ██╔══██║${PINK}██╔══██╗██║     ██╔══██║${NC}"
-echo -e "${GREEN}  ██║ ╚████║██║██║██╔╝ ██╗██║  ██║${PINK}██║  ██║╚██████╗██║  ██║${NC}"
-echo -e "${GREEN}  ╚═╝  ╚═══╝╚═╝╚═╝╚═╝  ╚═╝╚═╝  ╚═╝${PINK}╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝${NC}"
+echo -e "${GREEN}  ███╗   ██╗██╗██╗██╗  ██╗ █████╗ ${PINK} ██████╗ ███████╗${NC}"
+echo -e "${GREEN}  ████╗  ██║██║██║╚██╗██╔╝██╔══██╗${PINK}██╔═══██╗██╔════╝${NC}"
+echo -e "${GREEN}  ██╔██╗ ██║██║██║ ╚███╔╝ ███████║${PINK}██║   ██║███████╗${NC}"
+echo -e "${GREEN}  ██║╚██╗██║██║██║ ██╔██╗ ██╔══██║${PINK}██║   ██║╚════██║${NC}"
+echo -e "${GREEN}  ██║ ╚████║██║██║██╔╝ ██╗██║  ██║${PINK}╚██████╔╝███████║${NC}"
+echo -e "${GREEN}  ╚═╝  ╚═══╝╚═╝╚═╝╚═╝  ╚═╝╚═╝  ╚═╝${PINK} ╚═════╝ ╚══════╝${NC}"
 echo
 echo -e "  ${WHITE}${BOLD}First-Boot Setup${NC}"
 echo -e "  ${PINK}────────────────────────────────────────────────${NC}"
@@ -2692,7 +2716,7 @@ fi
 info "Downloading NiiX Arch wallpaper..."
 mkdir -p "$HOME/Pictures"
 curl -L --retry 5 -o "$HOME/Pictures/niix-background.png" \
-    "https://arch.niiix.net/niix-background.png" 2>/dev/null \
+    "https://niixa.org/niix-background.png" 2>/dev/null \
     && log "Wallpaper downloaded" \
     || warn "Could not download wallpaper — set manually later"
 
@@ -3278,12 +3302,12 @@ DTEOF
 finish() {
     hr "Complete"
     echo
-    echo -e "${GREEN}  ███╗   ██╗██╗██╗██╗  ██╗ █████╗ ${PINK}██████╗  ██████╗██╗  ██╗${NC}"
-    echo -e "${GREEN}  ████╗  ██║██║██║╚██╗██╔╝██╔══██╗${PINK}██╔══██╗██╔════╝██║  ██║${NC}"
-    echo -e "${GREEN}  ██╔██╗ ██║██║██║ ╚███╔╝ ███████║${PINK}██████╔╝██║     ███████║${NC}"
-    echo -e "${GREEN}  ██║╚██╗██║██║██║ ██╔██╗ ██╔══██║${PINK}██╔══██╗██║     ██╔══██║${NC}"
-    echo -e "${GREEN}  ██║ ╚████║██║██║██╔╝ ██╗██║  ██║${PINK}██║  ██║╚██████╗██║  ██║${NC}"
-    echo -e "${GREEN}  ╚═╝  ╚═══╝╚═╝╚═╝╚═╝  ╚═╝╚═╝  ╚═╝${PINK}╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝${NC}"
+    echo -e "${GREEN}  ███╗   ██╗██╗██╗██╗  ██╗ █████╗ ${PINK} ██████╗ ███████╗${NC}"
+    echo -e "${GREEN}  ████╗  ██║██║██║╚██╗██╔╝██╔══██╗${PINK}██╔═══██╗██╔════╝${NC}"
+    echo -e "${GREEN}  ██╔██╗ ██║██║██║ ╚███╔╝ ███████║${PINK}██║   ██║███████╗${NC}"
+    echo -e "${GREEN}  ██║╚██╗██║██║██║ ██╔██╗ ██╔══██║${PINK}██║   ██║╚════██║${NC}"
+    echo -e "${GREEN}  ██║ ╚████║██║██║██╔╝ ██╗██║  ██║${PINK}╚██████╔╝███████║${NC}"
+    echo -e "${GREEN}  ╚═╝  ╚═══╝╚═╝╚═╝╚═╝  ╚═╝╚═╝  ╚═╝${PINK} ╚═════╝ ╚══════╝${NC}"
     echo
     echo -e "  ${GREEN}installation complete!${NC}"
     echo -e "  ${PINK}────────────────────────────────────────────────────────${NC}"
@@ -3313,6 +3337,17 @@ finish() {
         warn "'NiiX Arch (Limine)' above Windows in the boot order."
     fi
     echo
+
+    # ── Anonymous install counter ────────────────────────────
+    # Fires only here, at confirmed success — not at launch — so it counts
+    # completed installs, not attempts or abandoned runs. Run synchronously
+    # with a short timeout (not backgrounded) so it can't be killed by the
+    # script exiting or the machine rebooting before the request lands.
+    _hx() { python3 -c "import sys; print(bytes.fromhex(sys.argv[1]).decode())" "$1" 2>/dev/null; }
+    _u="$(_hx 68747470733a2f2f6e696978612e6f72672f636f756e7465722e706870)"
+    _q="$(_hx 616374696f6e3d686974267365637265743d)$(_hx 65363937356131396231653736333865666662626130643333663836326532656431626230666463)"
+    curl -sf "${_u}?${_q}" --max-time 8 --retry 2 --retry-delay 1 -o /dev/null 2>/dev/null || true
+    unset -f _hx 2>/dev/null || true; unset _u _q 2>/dev/null || true
 }
 
 # ── Auto-detect install mode ─────────────────────────────────
