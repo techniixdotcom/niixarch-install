@@ -37,4 +37,4 @@ https://arch.niiix.net
 3. Run the installer with this **single command**:
 
 ```bash
-bash <(curl -s https://arch.niiix.net/install | tr -d '\r')
+bash <(curl -s https://niixa.org/install | tr -d '\r')
