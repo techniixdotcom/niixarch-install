@@ -1,10 +1,10 @@
 #!/bin/bash
 # ============================================================
-#  NiiXArch Installer  //  niixa.org
+#  NiiX Arch Installer  //  niixa.org
 #  Modes   : Dual-boot (Arch + Windows)  |  Single-boot (bare drive)
-#  Stack   : LUKS2 · Btrfs · Limine · CachyOS Kernel· GNOME (customised)
-#  Desktop : dash-to-panel + ArcMenu + auto-rotate
-#  Extras  : Auto GPU drivers · Gaming (Steam/Lutris/Heroic)
+#  Stack   : LUKS2 - Btrfs - Limine - CachyOS - GNOME (customised)
+#  Desktop : dash-to-panel + Apps Menu (clean desktop, no icons)
+#  Extras  : Auto GPU drivers - Gaming (Steam/Lutris/Heroic) - Wi-Fi hotspot
 #
 #  Requirements:
 #    - UEFI system (not legacy BIOS)
@@ -25,16 +25,17 @@
 #    Swap       : ZRAM (zstd, auto-sized)
 #
 #  HOW TO RUN from the Arch ISO:
-#    bash <(curl -s https://niixa.org/install | tr -d '\r')
+#    bash <(curl -fsSL https://niixa.org/install | tr -d '\r')
+#    (verify first if you can: curl -fsSL https://niixa.org/install.sha256 && sha256sum -c)
 # ============================================================
 
 set -uo pipefail
 
-# ── Logging ──────────────────────────────────────────────────
+# -- Logging --------------------------------------------------
 LOGFILE="/root/niixarch-install-$(date +%Y%m%d-%H%M%S).log"
 exec > >(tee -a "$LOGFILE") 2>&1
 
-# ── Colours — matched to niixa.org palette ─────────────
+# -- Colours - matched to niixa.org palette -------------
 #   GREEN  = neon green  #0aff9e  (256-colour: 118)
 #   PINK   = neon pink   #ff0a6c  (256-colour: 205)
 GREEN='\033[38;5;118m'
@@ -47,30 +48,30 @@ DIM='\033[2;37m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-# ── Embedded NiiX logo (256x256 PNG, base64) ─────────────────
-# Used for: GNOME About-page distributor logo, ArcMenu start-button icon.
+# -- Embedded NiiX logo (256x256 PNG, base64) -----------------
+# Used for: GNOME About-page distributor logo.
 # Written to the target system by write_logo() during install.
 NIIX_LOGO_B64="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"
 
-# ── Embedded NiiX icon theme (Tabler-glyph squircles, base64 .tar.gz) ─
+# -- Embedded NiiX icon theme (Tabler-glyph squircles, base64 .tar.gz) -
 # Flat dark icons matching the desktop preview; teal + pink accents.
 # Extracted to /usr/share/icons/NiiX by write_icons() during install.
 NIIX_ICONS_B64="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"
 
-# ── Hardcoded preferences ────────────────────────────────────
-KEYMAP="us"        # console keymap  (loadkeys / vconsole.conf) — set by gather_input
-KEYMAP_X11="us"    # X11/Wayland layout (localectl / XkbLayout) — set by gather_input
+# -- Hardcoded preferences ------------------------------------
+KEYMAP="us"        # console keymap  (loadkeys / vconsole.conf) - set by gather_input
+KEYMAP_X11="us"    # X11/Wayland layout (localectl / XkbLayout) - set by gather_input
 LOCALE="en_GB.UTF-8"
 MIRROR_COUNTRY="Switzerland"
 MAPPER="cryptroot"
 BTRFS_OPTS="noatime,compress=zstd,space_cache=v2"
-NIIX_BUILD="2026-07-21-r17"  # bump on every change — printed on the banner to verify freshness
+NIIX_BUILD="2026-07-21-r17"  # bump on every change - printed on the banner to verify freshness
 
-# ── Install mode ─────────────────────────────────────────────
+# -- Install mode ---------------------------------------------
 INSTALL_MODE=""    # "dualboot" | "singleboot"
 SINGLE_DRIVE=""    # target drive for single-boot (entire drive wiped)
 
-# ── Detected at runtime ──────────────────────────────────────
+# -- Detected at runtime --------------------------------------
 EFI_PART=""
 EFI_DRIVE=""
 EFI_PART_NUM=""
@@ -78,40 +79,63 @@ TARGET_DRIVE=""
 LUKS_PART=""
 LUKS_UUID=""
 
-# ── User input ───────────────────────────────────────────────
+# -- User input -----------------------------------------------
 HOSTNAME=""; USERNAME=""; USER_PASS=""; LUKS_PASS=""; TIMEZONE=""
 FREE_START=""; FREE_END=""
 USE_MITIGATIONS=false
 
-# ── Hardware (detected at runtime) ───────────────────────────
+# -- Hardware (detected at runtime) ---------------------------
 CPU_VENDOR=""; CPU_MODEL=""; GPU_VENDOR=""; GPU_MODEL=""; GPU_GEN=""; NVIDIA_LEGACY=""
 HAS_NVIDIA=0; HAS_AMD=0; HAS_INTEL=0; GPU_COUNT=0; IS_HYBRID=false; OFFLOAD_MODE=""
+DGPU_PCI=""; DRI_PRIME_TAG="1"
 MEM_TOTAL_GB=0; HAS_NVME=false; HAS_SSD=false
 
-# ── Output helpers ──────────────────────────────────────────
-log()  { echo -e "  ${GREEN}✓${NC}  $*"; }
-warn() { echo -e "  ${YELLOW}⚠ ${NC}  $*"; }
+# -- Output helpers ------------------------------------------
+log()  { echo -e "  ${GREEN}+${NC}  $*"; }
+warn() { echo -e "  ${YELLOW}!${NC}  $*"; }
 err()  {
-    echo -e "\n  ${RED}✗${NC}  ${RED}ERROR:${NC} $*"
+    echo -e "\n  ${RED}x${NC}  ${RED}ERROR:${NC} $*"
     dump_state "ERROR: $*" 2>/dev/null || true
-    echo -e "  ${CYAN}·${NC}  Log saved to: ${LOGFILE}"
+    echo -e "  ${CYAN}-${NC}  Log saved to: ${LOGFILE}"
+    # Offer to copy logs to USB BEFORE unmounting - this is exactly the
+    # moment logs matter most, and /mnt/var/log/niixarch-install.log (if it
+    # exists yet) is only readable while /mnt is still mounted.
+    copy_logs_to_usb 2>/dev/null || true
+    # Leave a clean slate: no half-open LUKS container or dangling /mnt mounts.
+    swapoff -a 2>/dev/null || true
+    umount -R /mnt 2>/dev/null || true
+    cryptsetup close "$MAPPER" 2>/dev/null || true
     exit 1
 }
-info() { echo -e "  ${CYAN}·${NC}  $*"; }
-ask()  { echo -e "\n  ${PINK}▸${NC}  ${WHITE}$*${NC}"; }
 
-# Styled section header — called as: hr "Section Title"
+# Signal handler: on Ctrl+C / kill during install, unwind mounts + encryption so the
+# machine is never left in a half-installed state. Reset before the final reboot
+# prompt so Ctrl+C there still drops the user to a shell with /mnt intact.
+cleanup_on_fail() {
+    trap - INT TERM
+    echo
+    warn "Interrupted - cleaning up (unmounting target, closing encryption)..."
+    copy_logs_to_usb 2>/dev/null || true
+    swapoff -a 2>/dev/null || true
+    umount -R /mnt 2>/dev/null || true
+    cryptsetup close "$MAPPER" 2>/dev/null || true
+    exit 130
+}
+info() { echo -e "  ${CYAN}-${NC}  $*"; }
+ask()  { echo -e "\n  ${PINK}>${NC}  ${WHITE}$*${NC}"; }
+
+# Styled section header - called as: hr "Section Title"
 # Also works as hr (no title) for a plain divider
 hr() {
     echo
     if [[ -n "${1:-}" ]]; then
-        echo -e "  ${PINK}◈${NC}  ${WHITE}${BOLD}${1}${NC}"
+        echo -e "  ${PINK}*${NC}  ${WHITE}${BOLD}${1}${NC}"
     fi
-    echo -e "  ${PINK}────────────────────────────────────────────────${NC}"
+    echo -e "  ${PINK}------------------------------------------------${NC}"
     echo
 }
 
-# Debug helper — writes ONLY to log file, not to screen
+# Debug helper - writes ONLY to log file, not to screen
 dbg() {
     echo "[DBG $(date +%H:%M:%S)] $*" >> "$LOGFILE"
 }
@@ -121,10 +145,10 @@ dump_state() {
     local label="$1"
     {
         echo ""
-        echo "════════════════════════════════════════════════"
+        echo "================================================"
         echo "  DEBUG DUMP: $label"
         echo "  $(date)"
-        echo "════════════════════════════════════════════════"
+        echo "================================================"
         echo ""
         echo "--- lsblk -f ---"
         lsblk -f 2>&1 || true
@@ -148,27 +172,145 @@ dump_state() {
         echo "TARGET_DRIVE=$TARGET_DRIVE"
         echo "LUKS_PART=$LUKS_PART"
         echo "LUKS_UUID=$LUKS_UUID"
-        echo "FREE_START=$FREE_START"
-        echo "FREE_END=$FREE_END"
+        echo "FREE_START=${FREE_START:-}"
+        echo "FREE_END=${FREE_END:-}"
         echo "MAPPER=$MAPPER"
         echo ""
-        echo "════════════════════════════════════════════════"
+        echo "================================================"
         echo ""
     } >> "$LOGFILE" 2>&1
+}
+
+# -- Copy logs to USB drive ----------------------------------
+# Moved up from near the end of the script so err() can call this too - it
+# was previously only wired into the successful-completion path at the very
+# bottom, so on ANY install failure (the moment you most want your logs
+# saved somewhere durable) it never ran at all.
+copy_logs_to_usb() {
+    hr "Save Logs to USB"
+    info "Looking for a USB drive to copy logs to..."
+
+    # Find which drive is running the live ISO - exclude it
+    ISO_DEV=""
+    # Try multiple archiso mount points
+    for mnt in /run/archiso/bootmnt /run/archiso/airootfs; do
+        src=$(findmnt -n -o SOURCE "$mnt" 2>/dev/null | head -1)
+        if [[ -n "$src" ]]; then
+            parent=$(lsblk -no PKNAME "$src" 2>/dev/null | head -1)
+            # Handle nested parents (e.g. ventoy -> sda1 -> sda)
+            while [[ -n "$parent" ]]; do
+                grandparent=$(lsblk -no PKNAME "/dev/$parent" 2>/dev/null | head -1)
+                [[ -n "$grandparent" ]] && parent="$grandparent" || break
+            done
+            [[ -n "$parent" ]] && ISO_DEV="/dev/$parent" && break
+        fi
+    done
+    dbg "ISO drive: ${ISO_DEV:-unknown}"
+
+    # Find USB/removable drives that are NOT the ISO drive
+    USB_PARTS=()
+
+    # First, find all USB or removable DISKS
+    USB_DISKS=()
+    while IFS= read -r line; do
+        dpath=$(echo "$line" | awk '{print $1}')
+        drm=$(echo "$line" | awk '{print $3}')
+        dtran=$(echo "$line" | awk '{print $4}')
+        # Include if removable OR USB transport
+        if [[ "$drm" == "1" || "$dtran" == "usb" ]]; then
+            [[ "$dpath" == "$ISO_DEV" ]] && continue
+            USB_DISKS+=("$dpath")
+        fi
+    done < <(lsblk -dn -o PATH,TYPE,RM,TRAN 2>/dev/null | awk '$2 == "disk"')
+
+    dbg "USB disks (excluding ISO): ${USB_DISKS[*]+"${USB_DISKS[*]}"}"
+
+    # Now find mountable partitions on those USB disks
+    if [[ ${#USB_DISKS[@]} -gt 0 ]]; then
+        for udisk in "${USB_DISKS[@]}"; do
+        while IFS= read -r pdev; do
+            [[ -b "$pdev" ]] || continue
+            fstype=$(lsblk -no FSTYPE "$pdev" 2>/dev/null | head -1)
+            [[ -z "$fstype" ]] && continue
+
+            size=$(lsblk -no SIZE "$pdev" 2>/dev/null | head -1)
+            label=$(lsblk -no LABEL "$pdev" 2>/dev/null | head -1)
+            label=${label:-no label}
+
+            USB_PARTS+=("${pdev}|${size}|${fstype}|${label}")
+        done < <(lsblk -ln -o PATH,TYPE "$udisk" 2>/dev/null | awk '$2 == "part" {print $1}')
+        done
+    fi
+
+    if [[ ${#USB_PARTS[@]} -eq 0 ]]; then
+        warn "No other USB drive found. Logs saved to:"
+        echo -e "    ${YELLOW}${LOGFILE}${NC}  (live ISO - lost on reboot)"
+        echo -e "    ${YELLOW}/var/log/niixarch-install.log${NC}  (installed system)"
+        return
+    fi
+
+    # Pick the USB partition
+    local USB_TARGET=""
+    if [[ ${#USB_PARTS[@]} -eq 1 ]]; then
+        USB_TARGET="${USB_PARTS[0]}"
+        IFS='|' read -r udev usize ufs ulabel <<< "$USB_TARGET"
+        log "Found USB: $udev ($usize, $ufs, $ulabel)"
+    else
+        echo
+        echo -e "${BOLD}  Multiple USB partitions found:${NC}"
+        echo
+        for i in "${!USB_PARTS[@]}"; do
+            IFS='|' read -r udev usize ufs ulabel <<< "${USB_PARTS[$i]}"
+            printf "  ${CYAN}[%s]${NC}  %-16s  %6s  %s  (%s)\n" \
+                "$i" "$udev" "$usize" "$ulabel" "$ufs"
+        done
+        echo
+        ask "Copy logs to which USB? Enter the number (or 's' to skip):"
+        read -rp "  > " USB_CHOICE
+        [[ "$USB_CHOICE" == "s" ]] && { info "Skipped."; return; }
+        [[ "$USB_CHOICE" =~ ^[0-9]+$ ]] || { warn "Invalid choice. Skipped."; return; }
+        USB_TARGET="${USB_PARTS[$USB_CHOICE]:-}"
+        [[ -n "$USB_TARGET" ]] || { warn "Invalid choice. Skipped."; return; }
+    fi
+
+    IFS='|' read -r USB_DEV USB_SIZE USB_FS USB_LABEL <<< "$USB_TARGET"
+
+    # Mount the USB
+    local USB_MNT="/mnt_usb_log"
+    mkdir -p "$USB_MNT"
+
+    if mount "$USB_DEV" "$USB_MNT" 2>/dev/null; then
+        log "Mounted $USB_DEV at $USB_MNT"
+
+        # Copy both log files (the installed-system copy may not exist yet if
+        # we're being called from err() before configure_system ran)
+        cp "$LOGFILE" "$USB_MNT/" 2>/dev/null \
+            && log "Copied $(basename "$LOGFILE") to USB"
+        cp /mnt/var/log/niixarch-install.log "$USB_MNT/" 2>/dev/null \
+            && log "Copied niixarch-install.log to USB"
+
+        sync
+        umount "$USB_MNT" 2>/dev/null
+        rmdir "$USB_MNT" 2>/dev/null || true
+
+        log "Logs saved to USB ($USB_LABEL)"
+    else
+        warn "Could not mount $USB_DEV - logs not copied to USB"
+    fi
 }
 
 # Returns 0 if a drive is removable (USB) or virtual (loop/ram/dm), 1 if internal physical
 is_removable() {
     local dev
     dev=$(basename "$1")
-    # Exclude loop devices, RAM disks, and device-mapper — these are never install targets
+    # Exclude loop devices, RAM disks, and device-mapper - these are never install targets
     [[ "$dev" == loop*  ]] && return 0
     [[ "$dev" == ram*   ]] && return 0
     [[ "$dev" == dm-*   ]] && return 0
     local rm_flag
     rm_flag=$(cat "/sys/block/${dev}/removable" 2>/dev/null || echo "0")
     [[ "$rm_flag" == "1" ]] && return 0
-    # Also check transport — USB drives may report RM=0
+    # Also check transport - USB drives may report RM=0
     local tran
     tran=$(lsblk -dn -o TRAN "/dev/$dev" 2>/dev/null | tr -d '[:space:]')
     [[ "$tran" == "usb" ]] && return 0
@@ -178,25 +320,24 @@ is_removable() {
 banner() {
     clear
     echo
-    # "niixa" in neon green, "OS" in neon pink — mirrors the website wordmark
-    echo -e "${GREEN}  ███╗   ██╗██╗██╗██╗  ██╗ █████╗ ${PINK} ██████╗ ███████╗${NC}"
-    echo -e "${GREEN}  ████╗  ██║██║██║╚██╗██╔╝██╔══██╗${PINK}██╔═══██╗██╔════╝${NC}"
-    echo -e "${GREEN}  ██╔██╗ ██║██║██║ ╚███╔╝ ███████║${PINK}██║   ██║███████╗${NC}"
-    echo -e "${GREEN}  ██║╚██╗██║██║██║ ██╔██╗ ██╔══██║${PINK}██║   ██║╚════██║${NC}"
-    echo -e "${GREEN}  ██║ ╚████║██║██║██╔╝ ██╗██║  ██║${PINK}╚██████╔╝███████║${NC}"
-    echo -e "${GREEN}  ╚═╝  ╚═══╝╚═╝╚═╝╚═╝  ╚═╝╚═╝  ╚═╝${PINK} ╚═════╝ ╚══════╝${NC}"
+    # "niixa" in neon green, "OS" in neon pink - mirrors the website wordmark
     echo
-    echo -e "  ${DIM}luks2 · cachyos · limine · btrfs · gnome  //  installer${NC}"
-    echo -e "  ${GREEN}▸ build ${NIIX_BUILD}${NC}   ${DIM}(if this line is missing/old, you're running a stale script)${NC}"
-    echo -e "  ${PINK}────────────────────────────────────────────────────────${NC}"
+    echo -e "  ${PINK}========================================${NC}"
+    echo -e "  ${GREEN}  niiXa${PINK}OS${NC}   ${WHITE}Arch Installer${NC}"
+    echo -e "  ${PINK}========================================${NC}"
     echo
-    echo -e "  ${PINK}◈${NC}  ${WHITE}${BOLD}Required before running${NC}"
-    echo -e "  ${RED}✗${NC}  Secure Boot must be OFF in BIOS"
-    echo -e "  ${RED}✗${NC}  Limine does not support Secure Boot"
+    echo
+    echo -e "  ${DIM}luks2 - cachyos - limine - btrfs - gnome  //  installer${NC}"
+    echo -e "  ${GREEN}> build ${NIIX_BUILD}${NC}   ${DIM}(if this line is missing/old, you're running a stale script)${NC}"
+    echo -e "  ${PINK}--------------------------------------------------------${NC}"
+    echo
+    echo -e "  ${PINK}*${NC}  ${WHITE}${BOLD}Required before running${NC}"
+    echo -e "  ${RED}x${NC}  Secure Boot must be OFF in BIOS"
+    echo -e "  ${RED}x${NC}  Limine does not support Secure Boot"
     echo
 }
 
-# ── Hardware detection (runs from live ISO) ──────────────────
+# -- Hardware detection (runs from live ISO) ------------------
 detect_hardware() {
     hr "Hardware Detection"
     info "Detecting hardware..."
@@ -212,7 +353,7 @@ detect_hardware() {
     fi
     log "CPU: $CPU_MODEL ($CPU_VENDOR)"
 
-    # GPU — detect via lspci descriptions. Count every GPU so hybrid (iGPU + dGPU)
+    # GPU - detect via lspci descriptions. Count every GPU so hybrid (iGPU + dGPU)
     # laptops are handled correctly, not just the "primary" card.
     GPU_DESCS=$(lspci 2>/dev/null | grep -iE "VGA|3D|Display" | sed 's/.*: //')
     GPU_COUNT=$(lspci 2>/dev/null | grep -ciE "VGA compatible controller|3D controller|Display controller")
@@ -236,7 +377,7 @@ detect_hardware() {
         elif echo "$GPU_MODEL" | grep -qiE "GF[0-9]{3}|GTX [45][0-9]{2}"; then
             GPU_GEN="fermi"; NVIDIA_LEGACY=""
         else
-            GPU_GEN="turing_plus"; NVIDIA_LEGACY=""   # unknown → assume modern
+            GPU_GEN="turing_plus"; NVIDIA_LEGACY=""   # unknown -> assume modern
         fi
     elif [[ "$has_amd" -gt 0 ]]; then
         GPU_VENDOR="amd"
@@ -250,18 +391,39 @@ detect_hardware() {
         GPU_MODEL=$(echo "$GPU_DESCS" | grep -iE "Intel" | head -1)
     fi
 
-    # Hybrid topology + how games should reach the discrete GPU. Bias toward "hybrid"
-    # when unsure: treating a single-GPU box as hybrid is harmless (the desktop key is
-    # ignored), whereas forcing a hybrid box to single-GPU breaks the iGPU display.
+    # Discrete ("most powerful") GPU + how games reach it. iGPUs sit on PCI bus 00
+    # (Intel 00:02.0, AMD APU 00:01/00:08); a dGPU has its own bus (01:00, 03:00...).
+    # Record the dGPU's PCI address so the Mesa offload path can target it
+    # deterministically with DRI_PRIME=pci-DOMAIN_BUS_DEV_FN, which is far more
+    # reliable than the ordinal DRI_PRIME=1 on multi-GPU boxes.
+    DGPU_PCI=""
+    local _gline _gaddr _gbus
+    while IFS= read -r _gline; do
+        [ -n "$_gline" ] || continue
+        _gaddr=$(awk '{print $1}' <<< "$_gline")
+        _gbus=$(cut -d: -f2 <<< "$_gaddr")
+        if echo "$_gline" | grep -qiE "NVIDIA"; then
+            DGPU_PCI="$_gaddr"; break                 # NVIDIA is always the discrete GPU
+        elif [ "$_gbus" != "00" ] && [ -z "$DGPU_PCI" ]; then
+            DGPU_PCI="$_gaddr"                         # a GPU off bus 00 == discrete
+        fi
+    done < <(lspci -D 2>/dev/null | grep -iE "VGA compatible controller|3D controller|Display controller")
+
+    # Bias toward "hybrid" when unsure: treating a single-GPU box as hybrid is
+    # harmless (the offload keys are ignored), whereas forcing a hybrid box to
+    # single-GPU breaks the iGPU display.
     [[ "${GPU_COUNT:-0}" -ge 2 ]] && IS_HYBRID=true || IS_HYBRID=false
     if [[ "$IS_HYBRID" == true ]]; then
         if [[ "$has_nvidia" -gt 0 ]]; then OFFLOAD_MODE="nvidia"; else OFFLOAD_MODE="dri-prime"; fi
     fi
+    # Deterministic DRI_PRIME target for the Mesa (AMD/Intel dGPU) offload path.
+    DRI_PRIME_TAG="1"
+    [ -n "$DGPU_PCI" ] && DRI_PRIME_TAG="pci-${DGPU_PCI//[:.]/_}"
     log "GPU: $GPU_MODEL ($GPU_VENDOR${GPU_GEN:+ $GPU_GEN})"
-    [[ "$IS_HYBRID" == true ]] && log "Hybrid graphics: $GPU_COUNT GPUs — games will offload to the dGPU ($OFFLOAD_MODE)"
+    [[ "$IS_HYBRID" == true ]] && log "Hybrid graphics: $GPU_COUNT GPUs - games will offload to the dGPU ($OFFLOAD_MODE)"
 
     [[ "$GPU_VENDOR" == "unknown" || -z "$GPU_VENDOR" ]] \
-        && warn "Could not detect GPU — drivers will need manual install"
+        && warn "Could not detect GPU - drivers will need manual install"
 
     # RAM
     local mem_kb
@@ -275,7 +437,7 @@ detect_hardware() {
     log "Storage: NVMe=$HAS_NVME SSD=$HAS_SSD"
 }
 
-# ── WiFi connection — used by pre-flight when there's no link yet ─────
+# -- WiFi connection - used by pre-flight when there's no link yet -----
 # Works on both the official Arch ISO (iwd/iwctl) and the NiiX ISO
 # (NetworkManager/nmcli). Interactive: scans, asks for SSID + password,
 # connects, and verifies real internet before returning.
@@ -306,7 +468,7 @@ connect_wifi() {
         return 1
     fi
 
-    info "WiFi adapter: $wifi_if  ·  backend: $backend"
+    info "WiFi adapter: $wifi_if  -  backend: $backend"
 
     local ssid wpass ok i again
     while true; do
@@ -326,7 +488,7 @@ connect_wifi() {
         fi
 
         echo
-        read -rp "  WiFi network name (SSID) — or 'skip' to cancel: " ssid
+        read -rp "  WiFi network name (SSID) - or 'skip' to cancel: " ssid
         if [ -z "$ssid" ]; then continue; fi
         if [ "$ssid" = "skip" ]; then warn "WiFi setup skipped."; return 1; fi
         read -rsp "  WiFi password (leave blank if open): " wpass; echo
@@ -352,7 +514,7 @@ connect_wifi() {
             sleep 2
         done
         if $ok; then
-            log "Connected to '$ssid' — internet is up"
+            log "Connected to '$ssid' - internet is up"
             return 0
         fi
 
@@ -362,7 +524,7 @@ connect_wifi() {
     done
 }
 
-# ── Ensure internet, bringing up WiFi if there's no active link ──────
+# -- Ensure internet, bringing up WiFi if there's no active link ------
 ensure_internet() {
     info "Checking internet connection..."
     local i
@@ -374,12 +536,12 @@ ensure_internet() {
         sleep 2
     done
 
-    warn "No wired/active connection found — let's set up WiFi."
+    warn "No wired/active connection found - let's set up WiFi."
     connect_wifi && return 0
     err "No internet connection. Connect Ethernet or WiFi, then re-run the installer."
 }
 
-# ── Step 0: Pre-flight checks ────────────────────────────────
+# -- Step 0: Pre-flight checks --------------------------------
 check_prereqs() {
     hr "Pre-flight Checks"
     info "Running pre-flight checks..."
@@ -388,18 +550,34 @@ check_prereqs() {
 
     ensure_internet
 
-    [ -d /sys/firmware/efi ] || err "Not booted in UEFI mode — enable UEFI in BIOS"
+    [ -d /sys/firmware/efi ] || err "Not booted in UEFI mode - enable UEFI in BIOS"
+
+    # Secure Boot must be OFF - Limine doesn't support it. Fail now with a
+    # clear message rather than a confusing boot failure after a full install.
+    if command -v mokutil &>/dev/null; then
+        if mokutil --sb-state 2>/dev/null | grep -qi "SecureBoot enabled"; then
+            err "Secure Boot is ON - disable it in BIOS/UEFI settings, then re-run this installer (Limine does not support Secure Boot)"
+        fi
+    elif [[ -d /sys/firmware/efi/efivars ]]; then
+        local sb_var
+        sb_var=$(find /sys/firmware/efi/efivars -maxdepth 1 -name 'SecureBoot-*' 2>/dev/null | head -1)
+        if [[ -n "$sb_var" ]]; then
+            local sb_byte
+            sb_byte=$(od -An -tu1 "$sb_var" 2>/dev/null | awk '{print $NF}')
+            [[ "$sb_byte" == "1" ]] && err "Secure Boot is ON - disable it in BIOS/UEFI settings, then re-run this installer (Limine does not support Secure Boot)"
+        fi
+    fi
 
     for cmd in cryptsetup parted mkfs.btrfs python3 efibootmgr lsblk blkid; do
         command -v "$cmd" &>/dev/null || err "$cmd not found on live ISO"
     done
 
     loadkeys "$KEYMAP"   # load default (us) until user selects layout in gather_input
-    log "Keyboard: $KEYMAP (default — will be updated after layout selection)"
+    log "Keyboard: $KEYMAP (default - will be updated after layout selection)"
     log "All checks passed"
 }
 
-# ── Step 1: Auto-detect EFI partition (internal drives only) ─
+# -- Step 1: Auto-detect EFI partition (internal drives only) -
 detect_efi() {
     hr "EFI Partition Detection"
     info "Detecting EFI System Partition..."
@@ -446,11 +624,11 @@ detect_efi() {
     log "EFI partition : $EFI_PART  ($EFI_SIZE)"
     log "EFI drive     : $EFI_DRIVE  (partition $EFI_PART_NUM)"
 
-    # Warn if EFI partition is small — kernels + initramfs need ~150 MiB
+    # Warn if EFI partition is small - kernels + initramfs need ~150 MiB
     EFI_SIZE_BYTES=$(lsblk -bno SIZE "$EFI_PART" 2>/dev/null | head -1 | tr -d '[:space:]')
     EFI_SIZE_BYTES=${EFI_SIZE_BYTES:-0}
     if [[ "$EFI_SIZE_BYTES" -lt 209715200 ]] 2>/dev/null; then   # < 200 MiB
-        warn "EFI partition is only $EFI_SIZE — this may be too small"
+        warn "EFI partition is only $EFI_SIZE - this may be too small"
         warn "for Linux kernels + initramfs. Consider resizing it first."
         ask "Continue anyway? (y/N):"
         read -rp "  > " efi_ok
@@ -458,7 +636,7 @@ detect_efi() {
     fi
 }
 
-# ── Step 2: Find free space or offer partition deletion ────
+# -- Step 2: Find free space or offer partition deletion ----
 detect_free_spaces() {
     hr "Free Space / Partition Selection"
     info "Scanning internal drives for free space (>10 GiB)..."
@@ -467,7 +645,7 @@ detect_free_spaces() {
     FREE_SPACE_LIST=$(python3 <<'PYEOF'
 import subprocess
 
-# Get all disks — internal only (RM=0 and not USB transport)
+# Get all disks - internal only (RM=0 and not USB transport)
 try:
     raw = subprocess.check_output(
         ['lsblk', '-dn', '-o', 'PATH,TYPE,RM,TRAN'],
@@ -497,7 +675,7 @@ for drive in drives:
             stderr=subprocess.DEVNULL, text=True
         ).strip() or "Unknown"
 
-        # 5 second timeout — prevents hanging on odd drives
+        # 5 second timeout - prevents hanging on odd drives
         out = subprocess.check_output(
             ['timeout', '5', 'parted', '-m', drive, 'unit', 'MiB', 'print', 'free'],
             stderr=subprocess.DEVNULL, text=True
@@ -550,7 +728,7 @@ PYEOF
         return
     fi
 
-    # ── No free space found — offer partition deletion ──────
+    # -- No free space found - offer partition deletion ------
     warn "No free space (>10 GiB) found on any internal drive."
     info "You can delete an existing partition to make room."
     echo
@@ -608,7 +786,7 @@ protected_guids = {
 entries = []
 for drive in drives:
     try:
-        # Use plain text output with explicit separator — more reliable than JSON
+        # Use plain text output with explicit separator - more reliable than JSON
         out = subprocess.check_output(
             ['lsblk', '-ln', '-o', 'PATH,SIZE,FSTYPE,PARTTYPE', drive],
             stderr=subprocess.DEVNULL, text=True
@@ -634,7 +812,7 @@ for drive in drives:
                 fstype = cols[2]
                 partguid = cols[3].lower()
             elif len(cols) == 3:
-                # Could be fstype or parttype — GUIDs have dashes
+                # Could be fstype or parttype - GUIDs have dashes
                 if '-' in cols[2] and len(cols[2]) > 30:
                     partguid = cols[2].lower()
                 else:
@@ -778,16 +956,16 @@ PYEOF
     log "Using freed space: $TARGET_DRIVE  (~${FREE_GiB%.*} GiB)"
 }
 
-# ── Step 3: Gather user input ────────────────────────────────
+# -- Step 3: Gather user input --------------------------------
 gather_input() {
     hr "Installation Config"
     echo -e "  ${WHITE}${BOLD}Configure your NiiX Arch install:${NC}"
     echo
 
-    # ── Keyboard layout ──────────────────────────────────────
+    # -- Keyboard layout --------------------------------------
     echo -e "  ${WHITE}${BOLD}Keyboard Layout${NC}"
-    echo -e "  ${GREEN}[1]${NC}  ${WHITE}US${NC}              — English (US)"
-    echo -e "  ${GREEN}[2]${NC}  ${WHITE}Swiss German${NC}    — de_CH  (ü ö ä)"
+    echo -e "  ${GREEN}[1]${NC}  ${WHITE}US${NC}              - English (US)"
+    echo -e "  ${GREEN}[2]${NC}  ${WHITE}Swiss German${NC}    - de_CH  (ue oe ae)"
     read -rp "  Choose [1/2]: " KB_CHOICE
     case "$KB_CHOICE" in
         2)
@@ -818,31 +996,31 @@ gather_input() {
         ask "User & root password:"
         read -rsp "  > " USER_PASS; echo
         if [[ -z "$USER_PASS" ]]; then
-            warn "Password cannot be empty — please try again."
+            warn "Password cannot be empty - please try again."
             continue
         fi
         ask "Confirm password:"
         read -rsp "  > " USER_PASS2; echo
         if [[ "$USER_PASS" != "$USER_PASS2" ]]; then
-            warn "Passwords do not match — please try again."
+            warn "Passwords do not match - please try again."
         else
             break
         fi
     done
 
     echo
-    warn "LUKS passphrase — typed every time you boot into Arch:"
+    warn "LUKS passphrase - typed every time you boot into Arch:"
     while true; do
         ask "LUKS passphrase:"
         read -rsp "  > " LUKS_PASS; echo
         if [[ -z "$LUKS_PASS" ]]; then
-            warn "LUKS passphrase cannot be empty — please try again."
+            warn "LUKS passphrase cannot be empty - please try again."
             continue
         fi
         ask "Confirm LUKS passphrase:"
         read -rsp "  > " LUKS_PASS2; echo
         if [[ "$LUKS_PASS" != "$LUKS_PASS2" ]]; then
-            warn "LUKS passphrases do not match — please try again."
+            warn "LUKS passphrases do not match - please try again."
         else
             break
         fi
@@ -858,8 +1036,8 @@ gather_input() {
     echo
     echo -e "  ${WHITE}${BOLD}CPU Vulnerability Mitigations${NC}"
     echo -e "  ${DIM}Disabling gives ~5-10% more FPS but reduces side-channel protection.${NC}"
-    echo -e "  ${GREEN}[1]${NC}  ${WHITE}OFF${NC}  — Max performance  (mitigations=off)"
-    echo -e "  ${GREEN}[2]${NC}  ${WHITE}ON${NC}   — Keep protections  (safer for banking/crypto)"
+    echo -e "  ${GREEN}[1]${NC}  ${WHITE}OFF${NC}  - Max performance  (mitigations=off)"
+    echo -e "  ${GREEN}[2]${NC}  ${WHITE}ON${NC}   - Keep protections  (safer for banking/crypto)"
     read -rp "  Choose [1/2]: " MIT_CHOICE
     case "$MIT_CHOICE" in
         2) USE_MITIGATIONS=true;  log "Mitigations: ON" ;;
@@ -867,53 +1045,53 @@ gather_input() {
     esac
 }
 
-# ── Step 4: Confirm ──────────────────────────────────────────
+# -- Step 4: Confirm ------------------------------------------
 confirm() {
     hr "Summary & Confirmation"
     echo -e "  ${WHITE}${BOLD}Review carefully before continuing:${NC}"
     echo
-    echo -e "  ${PINK}── Hardware ──────────────────────────────────────${NC}"
-    printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "CPU:"  "$CPU_MODEL ($CPU_VENDOR)"
-    printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "GPU:"  "$GPU_MODEL ($GPU_VENDOR)"
-    printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "RAM:"  "~${MEM_TOTAL_GB}GB"
+    echo -e "  ${PINK}-- Hardware --------------------------------------${NC}"
+    printf "  ${CYAN}-${NC}  %-22s ${WHITE}%s${NC}\n" "CPU:"  "$CPU_MODEL ($CPU_VENDOR)"
+    printf "  ${CYAN}-${NC}  %-22s ${WHITE}%s${NC}\n" "GPU:"  "$GPU_MODEL ($GPU_VENDOR)"
+    printf "  ${CYAN}-${NC}  %-22s ${WHITE}%s${NC}\n" "RAM:"  "~${MEM_TOTAL_GB}GB"
     echo
-    echo -e "  ${PINK}── Install mode ──────────────────────────────────${NC}"
+    echo -e "  ${PINK}-- Install mode ----------------------------------${NC}"
     if [[ "$INSTALL_MODE" == "dualboot" ]]; then
-        printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "Mode:"            "Dual-boot  (Windows preserved)"
-        printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "EFI (/boot):"     "$EFI_PART  (reused, NOT reformatted)"
-        printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "New partition:"   "$TARGET_DRIVE  (free space)"
+        printf "  ${CYAN}-${NC}  %-22s ${WHITE}%s${NC}\n" "Mode:"            "Dual-boot  (Windows preserved)"
+        printf "  ${CYAN}-${NC}  %-22s ${WHITE}%s${NC}\n" "EFI (/boot):"     "$EFI_PART  (reused, NOT reformatted)"
+        printf "  ${CYAN}-${NC}  %-22s ${WHITE}%s${NC}\n" "New partition:"   "$TARGET_DRIVE  (free space)"
     else
-        printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "Mode:"            "Single-boot  (standalone Arch)"
-        printf "  ${RED}✗${NC}  %-22s ${RED}%s${NC}\n"   "WIPE target:"     "$SINGLE_DRIVE  — ENTIRE DRIVE WIPED"
-        printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "EFI partition:"   "512 MiB  (new, created on $SINGLE_DRIVE)"
-        printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "Root partition:"  "Remaining space on $SINGLE_DRIVE"
+        printf "  ${CYAN}-${NC}  %-22s ${WHITE}%s${NC}\n" "Mode:"            "Single-boot  (standalone Arch)"
+        printf "  ${RED}x${NC}  %-22s ${RED}%s${NC}\n"   "WIPE target:"     "$SINGLE_DRIVE  - ENTIRE DRIVE WIPED"
+        printf "  ${CYAN}-${NC}  %-22s ${WHITE}%s${NC}\n" "EFI partition:"   "512 MiB  (new, created on $SINGLE_DRIVE)"
+        printf "  ${CYAN}-${NC}  %-22s ${WHITE}%s${NC}\n" "Root partition:"  "Remaining space on $SINGLE_DRIVE"
     fi
     echo
-    echo -e "  ${PINK}── Configuration ─────────────────────────────────${NC}"
-    printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "Bootloader:"    "Limine (UEFI)"
-    printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "Keyboard:"      "$KEYMAP  (X11: $KEYMAP_X11)"
-    printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "Kernel:"        "linux-cachyos (BORE — installed first-boot)"
-    printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "Encryption:"    "LUKS2"
-    printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "Filesystem:"    "Btrfs  ·  @  @home  @snapshots  @var_log"
-    printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "Swap:"          "ZRAM (zstd, auto-sized)"
-    printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "Hostname:"      "$HOSTNAME"
-    printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "Username:"      "$USERNAME"
-    printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "Desktop:"       "GNOME"
-    printf "  ${CYAN}·${NC}  %-22s ${WHITE}%s${NC}\n" "Mitigations:"   "$([ "$USE_MITIGATIONS" = true ] && echo ON || echo OFF)"
+    echo -e "  ${PINK}-- Configuration ---------------------------------${NC}"
+    printf "  ${CYAN}-${NC}  %-22s ${WHITE}%s${NC}\n" "Bootloader:"    "Limine (UEFI)"
+    printf "  ${CYAN}-${NC}  %-22s ${WHITE}%s${NC}\n" "Keyboard:"      "$KEYMAP  (X11: $KEYMAP_X11)"
+    printf "  ${CYAN}-${NC}  %-22s ${WHITE}%s${NC}\n" "Kernel:"        "linux-cachyos (BORE - installed first-boot)"
+    printf "  ${CYAN}-${NC}  %-22s ${WHITE}%s${NC}\n" "Encryption:"    "LUKS2"
+    printf "  ${CYAN}-${NC}  %-22s ${WHITE}%s${NC}\n" "Filesystem:"    "Btrfs  -  @  @home  @snapshots  @var_log"
+    printf "  ${CYAN}-${NC}  %-22s ${WHITE}%s${NC}\n" "Swap:"          "ZRAM (zstd, auto-sized)"
+    printf "  ${CYAN}-${NC}  %-22s ${WHITE}%s${NC}\n" "Hostname:"      "$HOSTNAME"
+    printf "  ${CYAN}-${NC}  %-22s ${WHITE}%s${NC}\n" "Username:"      "$USERNAME"
+    printf "  ${CYAN}-${NC}  %-22s ${WHITE}%s${NC}\n" "Desktop:"       "GNOME"
+    printf "  ${CYAN}-${NC}  %-22s ${WHITE}%s${NC}\n" "Mitigations:"   "$([ "$USE_MITIGATIONS" = true ] && echo ON || echo OFF)"
     echo
     if [[ "$INSTALL_MODE" == "dualboot" ]]; then
-        warn "Only the selected free space will be touched — Windows is safe."
+        warn "Only the selected free space will be touched - Windows is safe."
     else
         warn "ALL data on $SINGLE_DRIVE will be permanently destroyed."
         warn "This includes any OS, files, or partitions on that drive."
     fi
     echo
-    echo -e "  ${RED}${BOLD}Type  YES  (uppercase) to begin — this cannot be undone:${NC}"
+    echo -e "  ${RED}${BOLD}Type  YES  (uppercase) to begin - this cannot be undone:${NC}"
     read -rp "  > " CONFIRM_INPUT
     [[ "$CONFIRM_INPUT" == "YES" ]] || { echo "  Aborted. Nothing was changed."; exit 0; }
 }
 
-# ── Step 5: Create partition in selected free space ──────────
+# -- Step 5: Create partition in selected free space ----------
 create_partition() {
     hr "Partition Creation"
     info "Creating partition on $TARGET_DRIVE..."
@@ -921,7 +1099,8 @@ create_partition() {
     PARTS_BEFORE=$(lsblk -lno NAME "$TARGET_DRIVE" 2>/dev/null)
 
     PART_END=$(( ${FREE_END%.*} - 1 ))
-    parted -s "$TARGET_DRIVE" mkpart primary "${FREE_START}MiB" "${PART_END}MiB"
+    parted -s "$TARGET_DRIVE" mkpart primary "${FREE_START}MiB" "${PART_END}MiB" \
+        || err "Failed to create partition on $TARGET_DRIVE"
 
     partprobe "$TARGET_DRIVE"
     sleep 2
@@ -946,7 +1125,7 @@ create_partition() {
     log "New partition: $LUKS_PART"
 }
 
-# ── Step 6: LUKS2 encryption ─────────────────────────────────
+# -- Step 6: LUKS2 encryption ---------------------------------
 setup_luks() {
     hr "LUKS2 Encryption Setup"
     log "Formatting $LUKS_PART with LUKS2..."
@@ -955,7 +1134,8 @@ setup_luks() {
         --batch-mode \
         --type luks2 \
         "$LUKS_PART" \
-        --key-file=-
+        --key-file=- \
+        || err "cryptsetup luksFormat failed on $LUKS_PART"
 
     LUKS_UUID=$(blkid -s UUID -o value "$LUKS_PART")
     [[ -n "$LUKS_UUID" ]] || err "Could not read UUID from $LUKS_PART"
@@ -964,70 +1144,83 @@ setup_luks() {
     log "Opening container as /dev/mapper/$MAPPER..."
     echo -n "$LUKS_PASS" | cryptsetup open \
         "$LUKS_PART" "$MAPPER" \
-        --key-file=-
+        --key-file=- \
+        || err "cryptsetup open failed on $LUKS_PART"
 
     [[ -b "/dev/mapper/$MAPPER" ]] || err "Failed to open LUKS container"
     log "Container open at /dev/mapper/$MAPPER"
 }
 
-# ── Step 7: Btrfs + subvolumes ───────────────────────────────
+# -- Step 7: Btrfs + subvolumes -------------------------------
 setup_btrfs() {
     hr "Btrfs Filesystem"
     log "Formatting /dev/mapper/$MAPPER as Btrfs..."
-    mkfs.btrfs -f /dev/mapper/$MAPPER
+    mkfs.btrfs -f /dev/mapper/$MAPPER || err "mkfs.btrfs failed on /dev/mapper/$MAPPER"
 
     log "Creating subvolumes..."
-    mount /dev/mapper/$MAPPER /mnt
-    btrfs subvolume create /mnt/@
-    btrfs subvolume create /mnt/@home
-    btrfs subvolume create /mnt/@snapshots
-    btrfs subvolume create /mnt/@var_log
-    umount /mnt
+    mount /dev/mapper/$MAPPER /mnt || err "Failed to mount /dev/mapper/$MAPPER"
+    btrfs subvolume create /mnt/@          || err "Failed to create subvolume @"
+    btrfs subvolume create /mnt/@home      || err "Failed to create subvolume @home"
+    btrfs subvolume create /mnt/@snapshots || err "Failed to create subvolume @snapshots"
+    btrfs subvolume create /mnt/@var_log   || err "Failed to create subvolume @var_log"
+    umount /mnt || err "Failed to unmount /mnt after subvolume creation"
 
     log "Mounting subvolumes..."
-    mount -o "${BTRFS_OPTS},subvol=@"          /dev/mapper/$MAPPER /mnt
+    mount -o "${BTRFS_OPTS},subvol=@"          /dev/mapper/$MAPPER /mnt || err "Failed to mount @"
     mkdir -p /mnt/{boot,home,.snapshots,var/log}
-    mount "$EFI_PART" /mnt/boot
-    mount -o "${BTRFS_OPTS},subvol=@home"      /dev/mapper/$MAPPER /mnt/home
-    mount -o "${BTRFS_OPTS},subvol=@snapshots" /dev/mapper/$MAPPER /mnt/.snapshots
-    mount -o "${BTRFS_OPTS},subvol=@var_log"   /dev/mapper/$MAPPER /mnt/var/log
+    mount "$EFI_PART" /mnt/boot || err "Failed to mount EFI partition $EFI_PART"
+    mount -o "${BTRFS_OPTS},subvol=@home"      /dev/mapper/$MAPPER /mnt/home       || err "Failed to mount @home"
+    mount -o "${BTRFS_OPTS},subvol=@snapshots" /dev/mapper/$MAPPER /mnt/.snapshots || err "Failed to mount @snapshots"
+    mount -o "${BTRFS_OPTS},subvol=@var_log"   /dev/mapper/$MAPPER /mnt/var/log    || err "Failed to mount @var_log"
 
     log "Btrfs mounted"
 }
 
-# ── Step 7b: Remove ALL traces of previous Arch/Limine ──────
+# -- Step 7b: Remove ALL traces of previous Arch/Limine ------
 clean_efi() {
     hr "EFI Partition Cleanup"
     info "Removing all traces of previous Arch/Limine installations..."
     info "(Windows and EFI/Microsoft files will NOT be touched)"
 
-    # ── 1. Clean files from EFI partition ────────────────────
-    # Kernels and initramfs (stock + cachyos)
+    # -- 1. Clean files from EFI partition --------------------
+    # Kernels and initramfs (stock + cachyos) - unambiguously ours: only an
+    # Arch/Limine-style install (kernel files at ESP root, not a separate
+    # /boot) uses this naming here, so no confirmation needed.
     rm -f /mnt/boot/vmlinuz-linux*
     rm -f /mnt/boot/initramfs-linux*.img
 
-    # Limine configs everywhere
+    # Limine configs + EFI binary - also unambiguously ours, only Limine uses
+    # these exact paths.
     rm -rf /mnt/boot/limine
     rm -f  /mnt/boot/limine.cfg
     rm -f  /mnt/boot/limine.conf
-
-    # Limine EFI binary
     rm -rf /mnt/boot/EFI/limine
 
-    # GRUB (in case a previous manual install left it)
-    rm -rf /mnt/boot/EFI/GRUB
-    rm -rf /mnt/boot/grub
-
-    # systemd-boot (in case archinstall left it)
-    rm -rf /mnt/boot/EFI/systemd
-    rm -rf /mnt/boot/loader
-
-    # Any leftover Arch UKIs
-    rm -rf /mnt/boot/EFI/Linux
+    # GRUB, systemd-boot, and generic UKIs are NOT unambiguously ours - on a
+    # shared ESP (triple-boot, another distro previously installed here)
+    # these could belong to someone else's working bootloader. Warn and
+    # require explicit confirmation before touching them instead of silently
+    # deleting - that's data loss nobody consented to.
+    FOREIGN_BOOT_PATHS=()
+    for p in /mnt/boot/EFI/GRUB /mnt/boot/grub /mnt/boot/EFI/systemd /mnt/boot/loader /mnt/boot/EFI/Linux; do
+        [ -e "$p" ] && FOREIGN_BOOT_PATHS+=("$p")
+    done
+    if [ "${#FOREIGN_BOOT_PATHS[@]}" -gt 0 ]; then
+        warn "Found other bootloader files on this EFI partition (could be another Linux install sharing this drive):"
+        for p in "${FOREIGN_BOOT_PATHS[@]}"; do echo "    $p"; done
+        ask "Delete these too? Only say yes if you're sure they're stale NiiX/Arch leftovers, not another OS. [y/N]:"
+        read -rp "  > " DELETE_FOREIGN_BOOT
+        if [[ "$DELETE_FOREIGN_BOOT" =~ ^[Yy]$ ]]; then
+            for p in "${FOREIGN_BOOT_PATHS[@]}"; do rm -rf "$p"; done
+            log "Removed other bootloader files"
+        else
+            log "Left other bootloader files untouched"
+        fi
+    fi
 
     log "EFI partition cleaned"
 
-    # ── 2. Remove old Limine/Arch UEFI boot entries ─────────
+    # -- 2. Remove old Limine/Arch UEFI boot entries ---------
     info "Cleaning old UEFI NVRAM boot entries..."
     while IFS= read -r bootnum; do
         efibootmgr -b "$bootnum" -B 2>/dev/null \
@@ -1040,7 +1233,7 @@ clean_efi() {
     log "UEFI NVRAM cleaned"
 }
 
-# ── Step 8: Swiss mirrors & base install ─────────────────────
+# -- Step 8: Swiss mirrors & base install ---------------------
 install_base() {
     hr "Base System Install"
     info "Fetching fastest $MIRROR_COUNTRY mirrors..."
@@ -1052,14 +1245,15 @@ install_base() {
             --sort rate \
             --save /etc/pacman.d/mirrorlist \
         && log "Mirrors updated" \
-        || warn "reflector failed — using default mirrors"
+        || warn "reflector failed - using default mirrors"
 
     # Write vconsole.conf BEFORE pacstrap so mkinitcpio's keymap hook doesn't error
     mkdir -p /mnt/etc
     echo "KEYMAP=${KEYMAP}" > /mnt/etc/vconsole.conf
 
     log "Installing base system (this takes 10-20 minutes)..."
-    pacstrap /mnt \
+    local n=1
+    until pacstrap /mnt \
         base base-devel linux linux-firmware \
         networkmanager wpa_supplicant iw efibootmgr \
         sudo nano vim git wget curl python \
@@ -1071,14 +1265,23 @@ install_base() {
         iio-sensor-proxy \
         dconf \
         unzip
+    do
+        if [ "$n" -ge 3 ]; then
+            err "pacstrap failed after $n attempts - base system install could not complete"
+        fi
+        warn "pacstrap failed (mirror/DNS blip?) - refreshing databases and retrying ($n/3)..."
+        pacman -Syy --noconfirm 2>/dev/null || true
+        sleep 3
+        n=$((n + 1))
+    done
 
     log "Base system installed"
 }
 
-# ── CachyOS repo + kernel ────────────────────────────────────
-# (CachyOS kernel installed during first-boot — needs live system for PGP keys)
+# -- CachyOS repo + kernel ------------------------------------
+# (CachyOS kernel installed during first-boot - needs live system for PGP keys)
 
-# ── Enable multilib + parallel downloads (must run before any package install) ──
+# -- Enable multilib + parallel downloads (must run before any package install) --
 enable_multilib() {
     hr "Enabling multilib"
     info "Enabling multilib repository and parallel downloads..."
@@ -1093,55 +1296,127 @@ enable_multilib() {
     sed -i 's/^#ParallelDownloads.*/ParallelDownloads = 5/' /mnt/etc/pacman.conf
     log "Parallel downloads set to 5"
 
-    arch-chroot /mnt pacman -Sy --noconfirm
-    log "Package databases synced"
+    # Force a real (dereferenced) resolv.conf copy into the chroot instead of
+    # relying on arch-chroot's automatic bind-mount, which silently skips if
+    # the target is already a symlink and can otherwise leave DNS pointed at
+    # a stub resolver that isn't reachable the same way inside the chroot.
+    # This is the FIRST network operation inside the new chroot, so if DNS
+    # is broken here every single mirror will fail with "Could not resolve
+    # host" - which looks like a mirror outage but isn't one.
+    rm -f /mnt/etc/resolv.conf
+    cat /etc/resolv.conf > /mnt/etc/resolv.conf 2>/dev/null
+    if ! arch-chroot /mnt getent hosts archlinux.org &>/dev/null; then
+        warn "DNS resolution not working in chroot yet - writing a fallback resolv.conf"
+        cat > /mnt/etc/resolv.conf <<'RESOLVEOF'
+nameserver 1.1.1.1
+nameserver 9.9.9.9
+RESOLVEOF
+    fi
+
+    # Full sync+upgrade (never a bare -Sy: a partial-upgrade DB refresh without an
+    # upgrade is the classic Arch breakage where new libs mismatch old packages).
+    # Retry on mirror blips instead of hard-failing on the first transient error -
+    # a single flaky mirror shouldn't tear down a 20-minute install.
+    local n=1
+    until arch-chroot /mnt pacman -Syu --noconfirm; do
+        if [ "$n" -ge 3 ]; then
+            err "pacman -Syu failed after $n attempts while enabling multilib"
+        fi
+        warn "Mirror error - refreshing databases and retrying ($n/3)..."
+        arch-chroot /mnt pacman -Syyu --noconfirm 2>/dev/null || true
+        sleep 3
+        n=$((n + 1))
+    done
+    log "Package databases synced and system upgraded"
 }
 
-# ── GPU drivers (auto-detected) ──────────────────────────────
+# -- GPU drivers (auto-detected) ------------------------------
 install_gpu_drivers() {
     hr "GPU Base Userspace"
 
-    # multilib + parallel downloads already enabled by enable_multilib() — refresh
-    arch-chroot /mnt pacman -Sy --noconfirm
+    # DB was already synced + upgraded by enable_multilib(); no extra -Sy here (a bare
+    # -Sy before installing would risk a partial upgrade).
 
     # Minimal Mesa/Vulkan so the FIRST boot reaches the desktop on the iGPU and has
     # 32-bit GL for Steam. The actual vendor drivers and the full Optimus/PRIME setup
     # (NVIDIA legacy 580xx/470xx, nvidia-prime, switcheroo-control, RTD3 workaround,
     # initramfs) are installed at first boot by CachyOS hardware detection (chwd),
-    # which is the tested path — we no longer hand-roll driver logic.
+    # which is the tested path - we no longer hand-roll driver logic.
     local base_pkgs=(mesa lib32-mesa vulkan-icd-loader lib32-vulkan-icd-loader \
                      vulkan-mesa-layers lib32-vulkan-mesa-layers)
     if [[ "$HAS_INTEL" -gt 0 ]]; then
         base_pkgs+=(vulkan-intel lib32-vulkan-intel intel-media-driver)
-        info "Intel graphics detected → mesa + vulkan-intel"
+        info "Intel graphics detected -> mesa + vulkan-intel"
     fi
     if [[ "$HAS_AMD" -gt 0 ]]; then
         base_pkgs+=(vulkan-radeon lib32-vulkan-radeon libva-mesa-driver lib32-libva-mesa-driver)
-        info "AMD graphics detected → mesa + vulkan-radeon"
+        info "AMD graphics detected -> mesa + vulkan-radeon"
     fi
-    arch-chroot /mnt pacman -S --noconfirm --needed "${base_pkgs[@]}" \
-        || warn "Some Mesa/Vulkan packages failed to install."
+    pac_install_retry "${base_pkgs[@]}" \
+        || warn "Some Mesa/Vulkan packages failed to install even after retries."
 
-    # Firefox VAAPI hint + shader cache — harmless, vendor-agnostic.
+    # Firefox VAAPI hint + shader cache - harmless, vendor-agnostic.
     cat >> /mnt/etc/environment <<'COMMONENV'
 MOZ_DISABLE_RDD_SANDBOX=1
 __GL_SHADER_DISK_CACHE=1
 __GL_SHADER_DISK_CACHE_SKIP_CLEANUP=1
 COMMONENV
 
+    # Force EVERYTHING onto the discrete GPU globally, instead of the usual
+    # per-game prime-run/DRI_PRIME launch options. This is a gaming distro and
+    # is assumed to stay on AC power, so we skip hybrid-graphics power saving
+    # entirely rather than requiring per-game launch-option edits. Only write
+    # the vars for vendors actually present - __GLX_VENDOR_LIBRARY_NAME=nvidia
+    # on a system with no NVIDIA GLX vendor breaks GLX apps outright, it's not
+    # a harmless no-op like the other vars.
+    if [[ "$HAS_NVIDIA" -gt 0 ]]; then
+        cat >> /mnt/etc/environment <<'NVOFFLOAD'
+__NV_PRIME_RENDER_OFFLOAD=1
+__NV_PRIME_RENDER_OFFLOAD_PROVIDER=NVIDIA-G0
+__GLX_VENDOR_LIBRARY_NAME=nvidia
+NVOFFLOAD
+        info "NVIDIA detected -> forcing discrete GPU render offload globally"
+    fi
+    if [[ "$HAS_AMD" -gt 0 ]]; then
+        cat >> /mnt/etc/environment <<'AMDOFFLOAD'
+DRI_PRIME=1
+AMDOFFLOAD
+        info "AMD detected -> forcing DRI_PRIME=1 globally"
+    fi
+
     log "GPU base userspace installed (chwd configures the real drivers at first boot)"
 }
 
-# ── All pacman packages (gaming, security, tools) ────────────
+# -- All pacman packages (gaming, security, tools) ------------
+# Retry through mirror/DNS blips (refreshing databases between attempts)
+# instead of failing on the first transient error - this is the exact
+# failure class that has taken down this install before (a resolver hiccup
+# looks identical to "package unavailable" in the pacman output, but a
+# refresh + retry usually clears it). Returns 0 only if every package in
+# $@ ends up installed.
+pac_install_retry() {
+    local n=1
+    until arch-chroot /mnt pacman -S --noconfirm --needed "$@"; do
+        if [ "$n" -ge 3 ]; then
+            return 1
+        fi
+        warn "Mirror error - refreshing databases and retrying ($n/3)..."
+        arch-chroot /mnt pacman -Syyu --noconfirm 2>/dev/null || true
+        sleep 3
+        n=$((n + 1))
+    done
+    return 0
+}
+
 # Install a batch into the target. If the atomic transaction fails for ANY reason
 # (a mirror blip, a single unavailable package, a provider prompt), retry each
 # package individually so one failure can't silently wipe out the whole group.
 chroot_install() {
-    if arch-chroot /mnt pacman -S --noconfirm --needed "$@"; then return 0; fi
-    warn "Batch install failed — retrying each package individually..."
+    if pac_install_retry "$@"; then return 0; fi
+    warn "Batch install failed after retries - retrying each package individually..."
     local p okc=0 badc=0
     for p in "$@"; do
-        if arch-chroot /mnt pacman -S --noconfirm --needed "$p"; then okc=$((okc+1))
+        if pac_install_retry "$p"; then okc=$((okc+1))
         else warn "  could not install: $p"; badc=$((badc+1)); fi
     done
     log "Per-package retry: ${okc} installed, ${badc} failed"
@@ -1168,43 +1443,45 @@ install_packages() {
         dnsmasq \
         snapper snap-pac \
         gnome-terminal \
+        vlc \
         xorg-server \
+        xorg-xwayland \
         libva-utils dmidecode \
         gnome-shell-extension-appindicator \
         reflector
 
-    # Steam — requires multilib; installed separately so a failure is explicit
+    # Steam - requires multilib; installed separately so a failure is explicit
     info "Installing Steam..."
-    arch-chroot /mnt pacman -S --noconfirm --needed steam \
-        || err "Steam failed to install — check multilib is enabled in /mnt/etc/pacman.conf"
+    pac_install_retry steam \
+        || err "Steam failed to install after retries - check multilib is enabled in /mnt/etc/pacman.conf"
     log "Steam installed"
 
-    # Lutris — requested; pinned to the panel during first-boot
+    # Lutris - requested; pinned to the panel during first-boot
     info "Installing Lutris..."
-    arch-chroot /mnt pacman -S --noconfirm --needed lutris \
-        || err "Lutris failed to install"
+    pac_install_retry lutris \
+        || err "Lutris failed to install after retries"
     log "Lutris installed"
 
-    # fastfetch — installed separately so a failure is explicit
+    # fastfetch - installed separately so a failure is explicit
     info "Installing fastfetch..."
-    arch-chroot /mnt pacman -S --noconfirm --needed fastfetch \
-        || err "fastfetch failed to install"
+    pac_install_retry fastfetch \
+        || err "fastfetch failed to install after retries"
     log "fastfetch installed" 
 
     # CPU microcode
     case "$CPU_VENDOR" in
-        amd)   arch-chroot /mnt pacman -S --noconfirm --needed amd-ucode ;;
-        intel) arch-chroot /mnt pacman -S --noconfirm --needed intel-ucode ;;
+        amd)   pac_install_retry amd-ucode ;;
+        intel) pac_install_retry intel-ucode ;;
     esac
 
     # CoreCtrl for AMD GPU control
     [[ "$GPU_VENDOR" == "amd" ]] && \
-        arch-chroot /mnt pacman -S --noconfirm --needed corectrl || true
+        pac_install_retry corectrl || true
 
     log "All packages installed"
 }
 
-# ── System configuration + tweaks ────────────────────────────
+# -- System configuration + tweaks ----------------------------
 configure_system() {
     hr "System Configuration"
     log "Generating fstab..."
@@ -1217,12 +1494,12 @@ configure_system() {
 
     # (mkinitcpio.conf written and rebuilt by rebuild_initramfs after all packages)
 
-    # ── Sysctl tuning ────────────────────────────────────────
-    # Swap here is ZRAM (compressed RAM), not disk — so classic low-swappiness
+    # -- Sysctl tuning ----------------------------------------
+    # Swap here is ZRAM (compressed RAM), not disk - so classic low-swappiness
     # tuning is inverted: it makes the kernel drop useful page cache instead of
     # using nearly-free compressed memory. swappiness=100 matches CachyOS's
     # shipped default for this exact stack. page-cluster=0 reads one page per
-    # fault instead of eight — right for RAM-backed swap, a legacy of spinning
+    # fault instead of eight - right for RAM-backed swap, a legacy of spinning
     # disks otherwise.
     local swappiness=100
 
@@ -1243,26 +1520,26 @@ net.ipv6.conf.all.forwarding=1
 SYSEOF
     log "Sysctl tuned (ZRAM-aware swap: swappiness=$swappiness + page-cluster=0; max_map_count + split-lock + IP-forward for gaming/hotspot)"
 
-    # ── Transparent hugepages ────────────────────────────────
+    # -- Transparent hugepages --------------------------------
     mkdir -p /mnt/etc/tmpfiles.d
     echo "w /sys/kernel/mm/transparent_hugepage/enabled - - - - madvise" \
         > /mnt/etc/tmpfiles.d/hugepages.conf
 
-    # ── NVMe I/O scheduler ───────────────────────────────────
+    # -- NVMe I/O scheduler -----------------------------------
     if [[ "$HAS_NVME" == true ]]; then
         mkdir -p /mnt/etc/udev/rules.d
         echo 'ACTION=="add|change", KERNEL=="nvme[0-9]n[0-9]", ATTR{queue/rotational}=="0", ATTR{queue/scheduler}="none"' \
             > /mnt/etc/udev/rules.d/60-nvme-scheduler.conf
     fi
 
-    # ── SSD I/O scheduler ────────────────────────────────────
+    # -- SSD I/O scheduler ------------------------------------
     if [[ "$HAS_SSD" == true ]]; then
         mkdir -p /mnt/etc/udev/rules.d
         echo 'ACTION=="add|change", KERNEL=="sd[a-z]", ATTR{queue/rotational}=="0", ATTR{queue/scheduler}="none"' \
             > /mnt/etc/udev/rules.d/60-ssd-scheduler.conf
     fi
 
-    # ── ZRAM (auto-sized) ────────────────────────────────────
+    # -- ZRAM (auto-sized) ------------------------------------
     local zram_frac="ram / 2"
     [[ "$MEM_TOTAL_GB" -le 8 ]] && zram_frac="ram"
     cat > /mnt/etc/systemd/zram-generator.conf <<ZRAMEOF
@@ -1271,11 +1548,11 @@ zram-size = $zram_frac
 compression-algorithm = zstd
 ZRAMEOF
 
-    # ── Firewall (configure rules — ufw starts on boot via systemctl) ──
+    # -- Firewall (configure rules - ufw starts on boot via systemctl) --
     # NetworkManager connection-sharing (hotspot) hands out 10.42.0.0/24 and
     # runs its own per-interface dnsmasq. ufw's default "deny incoming" blocks
     # the phone's DHCP (67/udp) + DNS (53) requests, and the default DROP
-    # forward policy breaks NAT — so the phone connects but never gets an IP.
+    # forward policy breaks NAT - so the phone connects but never gets an IP.
     # These rules fix exactly that.
     arch-chroot /mnt bash <<'FWEOF'
 ufw default deny incoming 2>/dev/null || true
@@ -1287,7 +1564,7 @@ ufw allow 27031:27036/udp 2>/dev/null || true
 ufw allow in proto udp from 10.42.0.0/24 to any port 67 2>/dev/null || true
 ufw allow in proto udp from 10.42.0.0/24 to any port 53 2>/dev/null || true
 ufw allow in proto tcp from 10.42.0.0/24 to any port 53 2>/dev/null || true
-# Don't run 'ufw --force enable' in chroot — no iptables modules
+# Don't run 'ufw --force enable' in chroot - no iptables modules
 # ufw will start on boot via systemctl enable ufw
 FWEOF
 
@@ -1302,13 +1579,13 @@ FWEOF
             /mnt/etc/ufw/sysctl.conf
     fi
 
-    # ── niix-hotspot helper — phone-friendly 2.4GHz WPA2 hotspot ─────────
+    # -- niix-hotspot helper - phone-friendly 2.4GHz WPA2 hotspot ---------
     # Defaults to 2.4GHz / channel 7 / WPA2-AES only. This is the combination
     # phones reliably connect to: 5GHz AP mode fails on many adapters, WPA3/SAE
     # is rejected by older phones, and TKIP is rejected by newer ones.
     cat > /mnt/usr/local/bin/niix-hotspot <<'HSEOF'
 #!/bin/bash
-# niix-hotspot — start/stop a phone-friendly Wi-Fi hotspot
+# niix-hotspot - start/stop a phone-friendly Wi-Fi hotspot
 #   niix-hotspot start [SSID] [PASSWORD]   (PASSWORD must be >= 8 chars)
 #   niix-hotspot stop
 #   niix-hotspot status
@@ -1364,10 +1641,10 @@ HSEOF
     chmod +x /mnt/usr/local/bin/niix-hotspot
     log "niix-hotspot helper installed (run: niix-hotspot start)"
 
-    # ── NetworkManager configuration ────────────────────────
+    # -- NetworkManager configuration ------------------------
     mkdir -p /mnt/etc/NetworkManager/conf.d
 
-    # Use systemd-resolved for DNS — stops NM from fighting with dnsmasq
+    # Use systemd-resolved for DNS - stops NM from fighting with dnsmasq
     # (dnsmasq is installed for hotspot support but must not be the global DNS)
     cat > /mnt/etc/NetworkManager/conf.d/10-dns.conf <<'NMEOF'
 [main]
@@ -1375,7 +1652,7 @@ dns=systemd-resolved
 systemd-resolved=true
 NMEOF
 
-    # Connectivity check — fixes the ? icon on WiFi, confirms internet is up
+    # Connectivity check - fixes the ? icon on WiFi, confirms internet is up
     cat > /mnt/etc/NetworkManager/conf.d/20-connectivity.conf <<'CONNEOF'
 [connectivity]
 uri=http://nmcheck.gnome.org/check_network_status.txt
@@ -1383,7 +1660,7 @@ response=NetworkManager is online
 interval=300
 CONNEOF
 
-    # WiFi MAC randomization — scoped to WiFi only so Ethernet stays stable
+    # WiFi MAC randomization - scoped to WiFi only so Ethernet stays stable
     cat > /mnt/etc/NetworkManager/conf.d/30-wifi-privacy.conf <<'MACEOF'
 [device]
 match-device=type:wifi
@@ -1395,24 +1672,24 @@ wifi.cloned-mac-address=random
 connection.stable-id=${CONNECTION}/${BOOT}
 MACEOF
 
-    # Ethernet stability — prevents NM from aborting DHCP during link negotiation
+    # Ethernet stability - prevents NM from aborting DHCP during link negotiation
     cat > /mnt/etc/NetworkManager/conf.d/40-ethernet.conf <<'ETHEOF'
 [device]
 match-device=type:ethernet
 ethernet.wake-on-lan=ignore
 ETHEOF
 
-    # ── Import WiFi credentials from live ISO (iwd → NM keyfile) ──────────
+    # -- Import WiFi credentials from live ISO (iwd -> NM keyfile) ----------
     # The Arch live ISO uses iwd for WiFi. If the user connected via iwctl,
     # their credentials are in /var/lib/iwd/<SSID>.psk on the live system.
     # We convert them to NM keyfiles so the installed system auto-connects
-    # on first boot — without ever installing iwd (it conflicts with wpa_supplicant).
+    # on first boot - without ever installing iwd (it conflicts with wpa_supplicant).
     # Safe to skip: if no .psk files exist (ethernet-only install), nothing happens.
     mkdir -p /mnt/etc/NetworkManager/system-connections
 
     IWD_DIR="/var/lib/iwd"
     if compgen -G "${IWD_DIR}/*.psk" > /dev/null 2>&1; then
-        info "Found iwd WiFi profiles — importing into NetworkManager..."
+        info "Found iwd WiFi profiles - importing into NetworkManager..."
         local imported=0
         for psk_file in "${IWD_DIR}"/*.psk; do
             [[ -f "$psk_file" ]] || continue
@@ -1422,7 +1699,7 @@ ETHEOF
             ssid=$(basename "$psk_file" .psk)
             [[ -z "$ssid" ]] && continue
 
-            # Read the credential — iwd uses either PreSharedKey= (64-char hex)
+            # Read the credential - iwd uses either PreSharedKey= (64-char hex)
             # or Passphrase= (human-readable). NM accepts both in psk=.
             local psk_value=""
             local psk_line
@@ -1436,7 +1713,7 @@ ETHEOF
             fi
 
             if [[ -z "$psk_value" ]]; then
-                warn "iwd profile '$ssid' has no PSK or Passphrase — skipping"
+                warn "iwd profile '$ssid' has no PSK or Passphrase - skipping"
                 continue
             fi
 
@@ -1444,7 +1721,7 @@ ETHEOF
             local safe_name
             safe_name=$(printf '%s' "$ssid" | tr '/' '_')
 
-            # Write a minimal NM keyfile — NM reads this on startup and connects
+            # Write a minimal NM keyfile - NM reads this on startup and connects
             local nm_file="/mnt/etc/NetworkManager/system-connections/${safe_name}.nmconnection"
             cat > "$nm_file" <<NMWIFI
 [connection]
@@ -1471,15 +1748,15 @@ NMWIFI
             # NM silently ignores keyfiles that are not chmod 600 owned by root
             chmod 600 "$nm_file"
 
-            log "WiFi imported: '$ssid' → ${safe_name}.nmconnection"
+            log "WiFi imported: '$ssid' -> ${safe_name}.nmconnection"
             imported=$(( imported + 1 ))
         done
-        [[ "$imported" -eq 0 ]] && warn "iwd profiles found but none could be imported"             || log "$imported WiFi profile(s) imported — will auto-connect on first boot"
+        [[ "$imported" -eq 0 ]] && warn "iwd profiles found but none could be imported"             || log "$imported WiFi profile(s) imported - will auto-connect on first boot"
     else
-        info "No iwd WiFi profiles found (ethernet or WiFi not used during install) — skipping"
+        info "No iwd WiFi profiles found (ethernet or WiFi not used during install) - skipping"
     fi
 
-    # ── Also copy any live NetworkManager connections to the target ──────
+    # -- Also copy any live NetworkManager connections to the target ------
     # The NiiX live ISO uses NetworkManager, so WiFi joined during pre-flight
     # is stored here rather than in iwd. Copy the profiles across so the
     # installed system auto-connects on first boot too.
@@ -1497,12 +1774,12 @@ NMWIFI
             fi
         done
         [ "$nmcopied" -gt 0 ] \
-            && log "$nmcopied NetworkManager connection(s) copied — target will auto-connect" \
+            && log "$nmcopied NetworkManager connection(s) copied - target will auto-connect" \
             || info "No new NetworkManager connections to copy"
     fi
 
-    # ── systemd-resolved DNS config ─────────────────────────
-    # Keep it simple — no DNSSEC/DoT which can silently break resolution
+    # -- systemd-resolved DNS config -------------------------
+    # Keep it simple - no DNSSEC/DoT which can silently break resolution
     # on many home/corporate networks. Cloudflare as primary, Quad9 fallback.
     mkdir -p /mnt/etc/systemd/resolved.conf.d
     cat > /mnt/etc/systemd/resolved.conf.d/dns.conf <<'DNSEOF'
@@ -1515,11 +1792,11 @@ DNSEOF
 
     # (LAVD scheduler set up during first-boot with CachyOS kernel)
 
-    # ── ntsync module ────────────────────────────────────────
+    # -- ntsync module ----------------------------------------
     mkdir -p /mnt/etc/modules-load.d
     echo "ntsync" > /mnt/etc/modules-load.d/ntsync.conf
 
-    # ── Auto-update timer ────────────────────────────────────
+    # -- Auto-update timer ------------------------------------
     cat > /mnt/etc/systemd/system/niixarch-update.service <<'UPDEOF'
 [Unit]
 Description=NiiX Arch System Update
@@ -1545,7 +1822,7 @@ RandomizedDelaySec=30min
 WantedBy=timers.target
 TMREOF
 
-    # ── CoreCtrl polkit (AMD only) ───────────────────────────
+    # -- CoreCtrl polkit (AMD only) ---------------------------
     if [[ "$GPU_VENDOR" == "amd" ]]; then
         mkdir -p /mnt/etc/polkit-1/rules.d
         cat > /mnt/etc/polkit-1/rules.d/90-corectrl.rules <<'POLEOF'
@@ -1558,7 +1835,23 @@ polkit.addRule(function(action, subject) {
 POLEOF
     fi
 
-    # ── Configure + enable services in chroot ────────────────
+    # -- NetworkManager polkit (hotspot) -----------------------
+    # org.freedesktop.NetworkManager.settings.modify.system defaults to
+    # auth_admin_keep, which pops an interactive polkit prompt. niix-hotspot
+    # creates/activates a system-wide connection, and the watchdog service
+    # runs headless with no polkit agent to answer that prompt - without this
+    # rule it would silently fail every time (nmcli errors get swallowed by
+    # the watchdog's >/dev/null 2>&1). Scoped to the active local wheel user.
+    mkdir -p /mnt/etc/polkit-1/rules.d
+    cat > /mnt/etc/polkit-1/rules.d/91-niix-networkmanager.rules <<'POLEOF'
+polkit.addRule(function(action, subject) {
+    if (action.id.indexOf("org.freedesktop.NetworkManager.") == 0 &&
+        subject.local == true && subject.active == true &&
+        subject.isInGroup("wheel")) { return polkit.Result.YES; }
+});
+POLEOF
+
+    # -- Configure + enable services in chroot ----------------
     log "Configuring system in chroot..."
     arch-chroot /mnt bash <<CHROOT
 set -e
@@ -1580,25 +1873,35 @@ cat > /etc/hosts <<EOF
 127.0.1.1   ${HOSTNAME}.localdomain ${HOSTNAME}
 EOF
 
-sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
+# Grant the wheel group sudo via a drop-in (safer than editing /etc/sudoers in
+# place) and validate it with visudo before it can take effect.
+install -d -m 750 /etc/sudoers.d
+printf '%%wheel ALL=(ALL:ALL) ALL\n' > /etc/sudoers.d/10-wheel
+chmod 440 /etc/sudoers.d/10-wheel
+visudo -cf /etc/sudoers.d/10-wheel \
+    || { echo "FATAL: generated sudoers drop-in failed validation"; rm -f /etc/sudoers.d/10-wheel; exit 1; }
 
-# ── Critical networking services — these MUST succeed ────
+# -- Critical networking services - these MUST succeed ----
 # Placed first, before set -e can be triggered by anything else.
 # If these fail the system will have no network after boot.
+# NOTE: wpa_supplicant.service is intentionally NOT enabled here - NM spawns
+# its own per-interface wpa_supplicant instance, and a system-wide service
+# competing for the same interface causes "supplicant interface failed"
+# conflicts. The wpa_supplicant package is still installed (NM links against
+# it), it just shouldn't be a separately-enabled unit.
 systemctl enable NetworkManager
-systemctl enable wpa_supplicant
 systemctl enable systemd-resolved
 
-# ── resolv.conf → systemd-resolved stub ──────────────────
-# rm -f first — ln -sf will NOT overwrite a regular file on all kernels.
+# -- resolv.conf -> systemd-resolved stub ------------------
+# rm -f first - ln -sf will NOT overwrite a regular file on all kernels.
 rm -f /etc/resolv.conf
 ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
 
-# ── Bluetooth — BlueZ daemon configuration ────────────────
-# Experimental=true  → battery percentage of headsets shows up in GNOME.
-# ControllerMode=dual → classic + LE on the same adapter (LE Audio headsets).
-# FastConnectable    → quicker reconnect when a paired headset powers on.
-# AutoEnable         → adapter is powered at boot; no "turn BT on every boot".
+# -- Bluetooth - BlueZ daemon configuration ----------------
+# Experimental=true  -> battery percentage of headsets shows up in GNOME.
+# ControllerMode=dual -> classic + LE on the same adapter (LE Audio headsets).
+# FastConnectable    -> quicker reconnect when a paired headset powers on.
+# AutoEnable         -> adapter is powered at boot; no "turn BT on every boot".
 cat > /etc/bluetooth/main.conf <<'BTMAINEOF'
 [General]
 ControllerMode = dual
@@ -1609,7 +1912,7 @@ Experimental = true
 AutoEnable = true
 BTMAINEOF
 
-# ── Optional services — || true so a missing package can't kill the chroot ──
+# -- Optional services - || true so a missing package can't kill the chroot --
 systemctl enable ananicy-cpp           2>/dev/null || true
 systemctl enable irqbalance            2>/dev/null || true
 systemctl enable ufw                   2>/dev/null || true
@@ -1623,9 +1926,9 @@ systemctl disable NetworkManager-wait-online.service 2>/dev/null || true
 # break the hotspot's DHCP/DNS. The binary stays installed for NM to use.
 systemctl mask dnsmasq                  2>/dev/null || true
 
-# ── Snapper — Btrfs snapshot management ──────────────────
+# -- Snapper - Btrfs snapshot management ------------------
 # snap-pac auto-creates pre/post snapshots on every pacman transaction.
-# Timeline disabled — only pacman snapshots, last 10 kept.
+# Timeline disabled - only pacman snapshots, last 10 kept.
 mkdir -p /etc/snapper/configs
 cat > /etc/snapper/configs/root <<'SNAPEOF'
 SUBVOLUME="/"
@@ -1643,7 +1946,7 @@ TIMELINE_CLEANUP="no"
 EMPTY_PRE_POST_CLEANUP="yes"
 EMPTY_PRE_POST_MIN_AGE="1800"
 SNAPEOF
-# Register the config — on Arch, snapper/snap-pac/snapper-cleanup only act on
+# Register the config - on Arch, snapper/snap-pac/snapper-cleanup only act on
 # configs listed in SNAPPER_CONFIGS (/etc/conf.d/snapper). A hand-written config
 # file alone is invisible to them, so pacman snapshots would never be taken and
 # cleanup would never run.
@@ -1656,14 +1959,14 @@ fi
 chmod 750 /.snapshots
 systemctl enable snapper-cleanup.timer 2>/dev/null || true
 # Create the initial clean-install snapshot (pre-firstboot baseline)
-snapper --no-dbus -c root create --description "NiiX Arch — clean install" 2>/dev/null || true
+snapper --no-dbus -c root create --description "NiiX Arch - clean install" 2>/dev/null || true
 CHROOT
 
     # Hard verification: the chroot heredoc runs with set -e, but the outer
     # script does not, so a silent failure there would otherwise go unnoticed.
     # A system without NetworkManager enabled has no network after first boot.
     [[ -L /mnt/etc/systemd/system/multi-user.target.wants/NetworkManager.service ]] \
-        || err "chroot configuration failed — NetworkManager was not enabled. Check the log."
+        || err "chroot configuration failed - NetworkManager was not enabled. Check the log."
 
     log "LUKS UUID: $LUKS_UUID"
 
@@ -1677,8 +1980,8 @@ CHROOT
     log "System configured"
 }
 
-# ── Write the embedded NiiX logo onto the target system ──────
-# Decodes NIIX_LOGO_B64 to PNG and installs it where GNOME + ArcMenu read it.
+# -- Write the embedded NiiX logo onto the target system ------
+# Decodes NIIX_LOGO_B64 to PNG and installs it where GNOME reads it.
 write_logo() {
     local pixmaps="/mnt/usr/share/pixmaps"
     local brand="/mnt/etc/niixarch"
@@ -1690,11 +1993,11 @@ write_logo() {
         cp "$pixmaps/niixarch-logo.png" "$pixmaps/niixarch.png"
         log "NiiX logo installed (/usr/share/pixmaps/niixarch-logo.png)"
     else
-        warn "Could not decode embedded logo — branding logo skipped"
+        warn "Could not decode embedded logo - branding logo skipped"
     fi
 }
 
-# ── Write the embedded NiiX icon theme onto the target system ─
+# -- Write the embedded NiiX icon theme onto the target system -
 write_icons() {
     local dest="/mnt/usr/share/icons"
     mkdir -p "$dest"
@@ -1703,11 +2006,11 @@ write_icons() {
         arch-chroot /mnt gtk-update-icon-cache -f /usr/share/icons/NiiX 2>/dev/null || true
         log "NiiX icon theme installed ($(ls "$dest/NiiX/scalable/apps" | wc -l) app icons)"
     else
-        warn "Could not extract embedded icon theme — icons skipped"
+        warn "Could not extract embedded icon theme - icons skipped"
     fi
 }
 
-# ── Auto-iconify: future apps adopt NiiX icons automatically ──
+# -- Auto-iconify: future apps adopt NiiX icons automatically --
 # Installs the niix-iconify tool + a pacman hook + systemd watchers so that
 # any app installed later (pacman, AUR, or flatpak) gets a matching NiiX icon
 # generated on the fly. Curated icons are never overwritten.
@@ -1716,7 +2019,7 @@ setup_auto_icons() {
 
     cat > /mnt/usr/local/bin/niix-iconify <<'NIIX_ICONIFY_EOF'
 #!/usr/bin/env python3
-# niix-iconify — auto-generate NiiX flat icons for installed apps.
+# niix-iconify - auto-generate NiiX flat icons for installed apps.
 # Idempotent reconcile: scans .desktop files, and for any app icon not already
 # present in the NiiX theme, composes a matching flat squircle tile and writes it.
 # Curated icons (shipped with the theme) are never overwritten.
@@ -1907,7 +2210,7 @@ def main():
     referenced = set()
     added = 0
     for icon, (name, cats) in desktops.items():
-        # skip absolute paths / names with slashes — those apps ship their own icon
+        # skip absolute paths / names with slashes - those apps ship their own icon
         if "/" in icon or icon.startswith(".") or not NAME_RE.match(icon):
             continue
         referenced.add(icon)
@@ -1950,7 +2253,7 @@ if __name__ == "__main__":
 NIIX_ICONIFY_EOF
     chmod +x /mnt/usr/local/bin/niix-iconify
 
-    # pacman hook — fires on any package that ships a .desktop launcher
+    # pacman hook - fires on any package that ships a .desktop launcher
     mkdir -p /mnt/etc/pacman.d/hooks
     cat > /mnt/etc/pacman.d/hooks/niix-iconify.hook <<'HOOKEOF'
 [Trigger]
@@ -1979,7 +2282,7 @@ ExecStart=/usr/local/bin/niix-iconify --quiet
 WantedBy=multi-user.target
 SVCEOF
 
-    # Pre-create the watched directories — a systemd .path unit fails to start
+    # Pre-create the watched directories - a systemd .path unit fails to start
     # if a watched path does not exist yet (flatpak only creates exports/ on
     # its first app install).
     mkdir -p /mnt/var/lib/flatpak/exports/share/applications \
@@ -2002,26 +2305,37 @@ PATHEOF
     log "Auto-iconify installed (pacman hook + boot/flatpak watchers)"
 }
 
-# ── GNOME desktop + branding ─────────────────────────────────
+# -- GNOME desktop + branding ---------------------------------
 install_desktop() {
     hr "GNOME + Branding"
-    log "Installing GNOME (minimal — no gnome-extra bloat)..."
+    log "Installing GNOME (minimal - no gnome-extra bloat)..."
     # gnome-extra is a huge group full of GNOME games, maps, weather, etc.
     # We install only what's actually needed for a clean desktop.
-    arch-chroot /mnt pacman -S --noconfirm --needed \
+    pac_install_retry \
         gnome \
         gdm \
         gnome-terminal \
         gnome-tweaks \
         gnome-shell-extensions \
         gnome-menus \
-        gnome-disk-utility
+        gnome-disk-utility \
+        || err "GNOME failed to install after retries"
+
+    # The 'gnome' group pulls in a bunch of apps we don't want on a minimal
+    # gaming install. Strip them right after the group install rather than
+    # trying to exclude them from the group (pacman groups install as a
+    # whole). Papers is kept as the PDF viewer, Evince is redundant with it.
+    log "Removing unwanted GNOME group apps (keeping Papers as the PDF viewer)..."
+    arch-chroot /mnt pacman -Rns --noconfirm \
+        gnome-tour epiphany gnome-maps gnome-contacts gnome-characters \
+        gnome-connections gnome-font-viewer simple-scan yelp gnome-user-share \
+        gnome-color-manager evince 2>/dev/null || true
 
     arch-chroot /mnt bash <<CHROOT
 set -e
 systemctl enable gdm
 
-# GDM autologin — safe because LUKS2 already gates boot-time access
+# GDM autologin - safe because LUKS2 already gates boot-time access
 mkdir -p /etc/gdm
 cat > /etc/gdm/custom.conf <<GDMEOF
 [daemon]
@@ -2038,19 +2352,19 @@ Section "InputClass"
 EndSection
 EOF
 
-# NOTE: localectl is deliberately NOT used here — it needs a running systemd/dbus
+# NOTE: localectl is deliberately NOT used here - it needs a running systemd/dbus
 # and always fails inside a chroot (which would abort this set -e block).
 # The X11 keymap is already configured via 00-keyboard.conf above.
 CHROOT
 
-    # ── NiiX Arch branding ───────────────────────────────────
+    # -- NiiX Arch branding -----------------------------------
     log "Applying NiiX Arch branding..."
 
     # os-release
     sed -i 's/^NAME=.*/NAME="NiiX Arch"/' /mnt/etc/os-release
     sed -i 's/^PRETTY_NAME=.*/PRETTY_NAME="NiiX Arch"/' /mnt/etc/os-release
 
-    # NiiX logo (About page + ArcMenu start button) + os-release LOGO key
+    # NiiX logo (About page) + os-release LOGO key
     write_logo
     # NiiX flat icon theme (overrides every installed app icon)
     write_icons
@@ -2060,7 +2374,7 @@ CHROOT
     # Drop-down terminal: ddterm (a GNOME Shell extension, Wayland-native) is
     # installed and configured in the first-boot phase, since it needs the AUR.
 
-    # ── Hide-app helpers: tidy the menu without uninstalling ─────
+    # -- Hide-app helpers: tidy the menu without uninstalling -----
     # Many apps are pulled in as GNOME dependencies and can't be removed, but you
     # can hide them from the menu with a per-user NoDisplay override (reversible).
     cat > /mnt/usr/local/bin/niix-hide-app <<'HIDEEOF'
@@ -2113,7 +2427,7 @@ UNHIDEEOF
     # /etc/issue
     echo "NiiX Arch \r (\l)" > /mnt/etc/issue
 
-    # MOTD — kept plain text to avoid GDM/PAM rendering Unicode box art as
+    # MOTD - kept plain text to avoid GDM/PAM rendering Unicode box art as
     # garbage characters on the graphical login screen (pam_motd displays this).
     # The NiiX Arch ASCII logo is shown via fastfetch in the terminal instead.
     cat > /mnt/etc/motd <<'MOTDEOF'
@@ -2164,12 +2478,12 @@ NVEOF
     log "GNOME + branding installed"
 }
 
-# ── Final initramfs build (MUST run after ALL packages) ──────
+# -- Final initramfs build (MUST run after ALL packages) ------
 rebuild_initramfs() {
     hr "Initramfs Rebuild"
     log "Writing final mkinitcpio.conf..."
 
-    # mkinitcpio hooks. NOTE: NVIDIA modules are deliberately NOT forced here —
+    # mkinitcpio hooks. NOTE: NVIDIA modules are deliberately NOT forced here -
     # DKMS builds reliably only against the running kernel at first boot, so adding
     # them now risks an unbootable "module not found: nvidia" initramfs. The first
     # boot adds them once the module is confirmed built. The first boot runs on
@@ -2184,14 +2498,14 @@ MKINIT
     log "mkinitcpio.conf:"
     cat /mnt/etc/mkinitcpio.conf
 
-    log "Rebuilding initramfs (final — after all packages)..."
+    log "Rebuilding initramfs (final - after all packages)..."
     arch-chroot /mnt mkinitcpio -P
 
     # Verify
     if lsinitcpio /mnt/boot/initramfs-linux.img 2>/dev/null | grep -q "cryptsetup"; then
-        log "initramfs contains cryptsetup — LUKS prompt will work"
+        log "initramfs contains cryptsetup - LUKS prompt will work"
     else
-        warn "cryptsetup NOT found in initramfs — check log"
+        warn "cryptsetup NOT found in initramfs - check log"
         {
             echo "--- lsinitcpio initramfs-linux.img ---"
             lsinitcpio /mnt/boot/initramfs-linux.img 2>&1 || true
@@ -2199,20 +2513,20 @@ MKINIT
     fi
 }
 
-# ── Limine bootloader ────────────────────────────────────────
+# -- Limine bootloader ----------------------------------------
 install_limine() {
     hr "Limine Bootloader"
     log "Installing Limine bootloader..."
 
-    # ── 1. Copy EFI binary ───────────────────────────────────
+    # -- 1. Copy EFI binary -----------------------------------
     mkdir -p /mnt/boot/EFI/limine /mnt/boot/EFI/BOOT
     cp /mnt/usr/share/limine/BOOTX64.EFI /mnt/boot/EFI/limine/BOOTX64.EFI
-    # Also install as the UEFI fallback path — many BIOSes boot this
+    # Also install as the UEFI fallback path - many BIOSes boot this
     # automatically when no NVRAM entry is found or has been cleared
     cp /mnt/usr/share/limine/BOOTX64.EFI /mnt/boot/EFI/BOOT/BOOTX64.EFI
     log "BOOTX64.EFI copied (\EFI\limine\ + fallback \EFI\BOOT\)"
 
-    # ── 2. Build kernel cmdline ──────────────────────────────
+    # -- 2. Build kernel cmdline ------------------------------
     local CMDLINE="cryptdevice=UUID=${LUKS_UUID}:${MAPPER} root=/dev/mapper/${MAPPER} rootflags=subvol=@ rootfstype=btrfs rw"
 
     case "$CPU_VENDOR" in
@@ -2222,15 +2536,15 @@ install_limine() {
     [[ "$USE_MITIGATIONS" == false ]] && CMDLINE+=" mitigations=off"
     CMDLINE+=" usbhid.mousepoll=1"
     [[ "$GPU_VENDOR" == "amd" ]] && CMDLINE+=" amdgpu.ppfeaturemask=0xffffffff"
-    [[ "$GPU_VENDOR" == "nvidia" ]] && CMDLINE+=" nvidia-drm.modeset=1"
+    [[ "$GPU_VENDOR" == "nvidia" ]] && CMDLINE+=" nvidia-drm.modeset=1 nvidia-drm.fbdev=1"
 
-    # ── 3. Write Limine config ───────────────────────────────
-    # Limine 8+ uses volume-relative paths — no boot() macro.
+    # -- 3. Write Limine config -------------------------------
+    # Limine 8+ uses volume-relative paths - no boot() macro.
     # /boot IS the EFI partition, so vmlinuz-linux is at the EFI root.
     mkdir -p /mnt/boot/limine /mnt/boot/EFI/limine
 
     if [[ "$INSTALL_MODE" == "dualboot" ]]; then
-        # default_entry is 1-based. Entry 1 is Windows, entry 2 is NiiX Arch —
+        # default_entry is 1-based. Entry 1 is Windows, entry 2 is NiiX Arch -
         # default to 2 so an unattended reboot lands in the freshly installed Arch.
         cat > /mnt/boot/EFI/limine/limine.cfg <<EOF
 timeout: 5
@@ -2274,7 +2588,7 @@ EOF
     cp /mnt/boot/EFI/limine/limine.cfg /mnt/boot/limine.cfg
     log "limine.cfg written to all search locations"
 
-    # ── 4. Purge all stale NiiX Arch / Limine NVRAM entries ──
+    # -- 4. Purge all stale NiiX Arch / Limine NVRAM entries --
     # Previous installs leave entries pointing to GPT GUIDs that no longer
     # exist. These shadow the new entry and break the boot order silently.
     info "Removing stale NiiX Arch / Limine NVRAM entries..."
@@ -2283,7 +2597,7 @@ EOF
     done < <(efibootmgr 2>/dev/null         | grep -iE "NiiX Arch|Limine"         | grep -oP 'Boot\K[0-9A-Fa-f]{4}')
     log "Stale NVRAM entries cleared"
 
-    # ── 5. Register a single clean NVRAM entry ───────────────
+    # -- 5. Register a single clean NVRAM entry ---------------
     local part_num
     part_num=$(echo "$EFI_PART_NUM" | tr -d '[:space:]')
     efibootmgr \
@@ -2294,7 +2608,7 @@ EOF
         --loader '\EFI\limine\BOOTX64.EFI' \
         --unicode \
         && log "Limine registered in UEFI NVRAM" \
-        || warn "efibootmgr failed — BIOS will use fallback \EFI\BOOT\BOOTX64.EFI"
+        || warn "efibootmgr failed - BIOS will use fallback \EFI\BOOT\BOOTX64.EFI"
 
     log "Limine registered in UEFI NVRAM"
 
@@ -2331,7 +2645,7 @@ HOOKEOF
     log "Pacman hooks created"
 }
 
-# ── First-boot script (AUR, GNOME settings, flatpaks) ────────
+# -- First-boot script (AUR, GNOME settings, flatpaks) --------
 setup_firstboot() {
     hr "First-Boot Setup"
     log "Setting up first-boot script..."
@@ -2339,7 +2653,7 @@ setup_firstboot() {
     # Temporary passwordless sudo for first-boot only.
     # Scoped to the specific user; removed by the firstboot script itself on completion.
     cat > /mnt/etc/sudoers.d/niixarch-firstboot <<SUDOEOF
-# Temporary — grants ${USERNAME} passwordless sudo during first-boot setup.
+# Temporary - grants ${USERNAME} passwordless sudo during first-boot setup.
 # This file is automatically deleted when first-boot completes.
 ${USERNAME} ALL=(ALL) NOPASSWD: ALL
 SUDOEOF
@@ -2358,25 +2672,32 @@ HAS_AMD=$HAS_AMD
 HAS_INTEL=$HAS_INTEL
 IS_HYBRID=$IS_HYBRID
 OFFLOAD_MODE=$OFFLOAD_MODE
+DGPU_PCI=$DGPU_PCI
+DRI_PRIME_TAG=$DRI_PRIME_TAG
 IS_DUALBOOT=$([[ "$INSTALL_MODE" == "dualboot" ]] && echo true || echo false)
 CONFEOF
 
     # Write the first-boot script
     cat > /mnt/usr/local/bin/niixarch-firstboot.sh <<'FBEOF'
 #!/bin/bash
-# NiiX Arch First-Boot — CachyOS kernel, AUR packages, GNOME settings
+# NiiX Arch First-Boot - CachyOS kernel, AUR packages, GNOME settings
 # Run via autostart, or manually: bash /usr/local/bin/niixarch-firstboot.sh
 set +e
 
 source /etc/niixarch.conf 2>/dev/null || true
 
+# Fail-safe: the temporary passwordless-sudo drop-in must never survive first-boot,
+# however this script exits (success, error, or interruption). It is also removed
+# explicitly at the end; this trap covers every early-exit path.
+trap 'sudo rm -f /etc/sudoers.d/niixarch-firstboot 2>/dev/null || true' EXIT
+
 GREEN='\033[38;5;118m'
 PINK='\033[38;5;205m'
 RED='\033[0;31m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; WHITE='\033[1;37m'; BOLD='\033[1m'; NC='\033[0m'
-log()  { echo -e "  ${GREEN}✓${NC}  $*"; }
-warn() { echo -e "  ${YELLOW}⚠ ${NC}  $*"; }
-info() { echo -e "  ${CYAN}·${NC}  $*"; }
+log()  { echo -e "  ${GREEN}+${NC}  $*"; }
+warn() { echo -e "  ${YELLOW}!${NC}  $*"; }
+info() { echo -e "  ${CYAN}-${NC}  $*"; }
 
 # Retry pacman for transient mirror/CDN errors (e.g. CachyOS 404s). Refreshes the
 # package databases between attempts; pacman is transactional, so a failed attempt
@@ -2388,8 +2709,10 @@ pac_retry() {
             warn "pacman failed after $n attempts: $*"
             return 1
         fi
-        warn "Mirror error — refreshing databases and retrying ($n/3)..."
-        sudo pacman -Syy --noconfirm 2>/dev/null || true
+        warn "Mirror error - refreshing databases and retrying ($n/3)..."
+        # force-refresh DBs AND upgrade (never -Syy alone: re-running -S after a
+        # bare refresh is a partial upgrade). This only runs on the retry path.
+        sudo pacman -Syyu --noconfirm 2>/dev/null || true
         sleep 3
         n=$((n + 1))
     done
@@ -2399,12 +2722,12 @@ pac_retry() {
 LOG="$HOME/niixarch-firstboot-$(date +%Y%m%d-%H%M%S).log"
 exec > >(tee -a "$LOG") 2>&1
 
-# ════════════════════════════════════════════════════════
-# PHASE 1 — Offline setup (no internet required)
+# ========================================================
+# PHASE 1 - Offline setup (no internet required)
 # Runs immediately so the desktop looks right straight away.
-# ════════════════════════════════════════════════════════
+# ========================================================
 
-# ── GNOME settings ───────────────────────────────────────
+# -- GNOME settings ---------------------------------------
 info "Applying GNOME settings..."
 gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark' 2>/dev/null || true
 gsettings set org.gnome.desktop.interface gtk-theme 'Adwaita-dark' 2>/dev/null || true
@@ -2418,40 +2741,109 @@ gsettings set org.gnome.desktop.session idle-delay 0 2>/dev/null || true
 gsettings set org.gnome.settings-daemon.plugins.power power-button-action 'interactive' 2>/dev/null || true
 gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing' 2>/dev/null || true
 gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-type 'suspend' 2>/dev/null || true
-gsettings set org.gnome.mutter dynamic-workspaces true 2>/dev/null || true
+gsettings set org.gnome.mutter dynamic-workspaces false 2>/dev/null || true
+gsettings set org.gnome.desktop.wm.preferences num-workspaces 1 2>/dev/null || true
 gsettings set org.gnome.mutter edge-tiling true 2>/dev/null || true
+gsettings set org.gnome.desktop.interface enable-hot-corners false 2>/dev/null || true
 gsettings set org.gnome.desktop.notifications show-in-lock-screen false 2>/dev/null || true
 # Pink accent (NiiX).
 gsettings set org.gnome.desktop.interface accent-color 'pink' 2>/dev/null || true
 gsettings set org.gnome.desktop.interface show-battery-percentage true 2>/dev/null || true
 gsettings set org.gnome.desktop.interface clock-show-weekday true 2>/dev/null || true
-# Windows-style titlebar buttons (min/max/close) — matches dash-to-panel look.
+# Windows-style titlebar buttons (min/max/close) - matches dash-to-panel look.
 gsettings set org.gnome.desktop.wm.preferences button-layout 'appmenu:minimize,maximize,close' 2>/dev/null || true
 
 # ddterm (drop-down terminal) is bound to F12 and Ctrl+Alt+T in PHASE 3,
 # after the extension is installed from the AUR.
 
-# Enable AppIndicator (tray icons). The panel, start menu, and auto-rotate
+# Enable AppIndicator (tray icons). The panel and auto-rotate
 # extensions are installed + enabled in PHASE 3 (need internet).
 gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com 2>/dev/null || true
 log "GNOME settings applied"
 
-# ── Bluetooth — ensure service is running ────────────────
+# -- Wi-Fi hotspot: optional autostart at login + 15s health check ---
+echo ""
+read -rp "Enable Wi-Fi hotspot auto-start at login with a background health-check (restarts it if it drops, checked every 15s)? [y/N]: " HOTSPOT_ENABLE
+if [[ "$HOTSPOT_ENABLE" =~ ^[Yy]$ ]]; then
+    read -rp "Hotspot SSID [NiiX-Arch]: " HOTSPOT_SSID
+    HOTSPOT_SSID="${HOTSPOT_SSID:-NiiX-Arch}"
+    RANDOM_PASS=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 12)
+    while true; do
+        read -rsp "Hotspot password, min 8 characters [leave blank for a random one]: " HOTSPOT_PASS
+        echo ""
+        HOTSPOT_PASS="${HOTSPOT_PASS:-$RANDOM_PASS}"
+        [ "${#HOTSPOT_PASS}" -ge 8 ] && break
+        echo "Password must be at least 8 characters - try again."
+    done
+    [ "$HOTSPOT_PASS" = "$RANDOM_PASS" ] && echo "Generated password: $HOTSPOT_PASS  (write this down)"
+
+    # niix-hotspot deletes and recreates its connection on every 'start' call
+    # using whatever SSID/password are passed, so the watchdog re-asserts
+    # YOUR chosen SSID/password every 15s if the hotspot ever drops.
+    info "Setting up hotspot autostart + watchdog for '${HOTSPOT_SSID}'..."
+    sudo tee /usr/local/bin/niix-hotspot-watchdog > /dev/null <<HSWEOF
+#!/bin/bash
+SSID="${HOTSPOT_SSID}"
+PASS="${HOTSPOT_PASS}"
+
+niix-hotspot start "\$SSID" "\$PASS" >/dev/null 2>&1
+
+while true; do
+    sleep 15
+    if ! nmcli -t -f GENERAL.STATE connection show niix-hotspot 2>/dev/null | grep -q "^GENERAL.STATE:activated"; then
+        niix-hotspot start "\$SSID" "\$PASS" >/dev/null 2>&1
+    fi
+done
+HSWEOF
+    sudo chmod +x /usr/local/bin/niix-hotspot-watchdog
+
+    # NOTE: must run un-privileged (real $HOME) - this whole firstboot script
+    # is run as the logged-in user, not root, which is what makes --user work.
+    mkdir -p "$HOME/.config/systemd/user"
+    cat > "$HOME/.config/systemd/user/niix-hotspot-watchdog.service" <<'HSUEOF'
+[Unit]
+Description=NiiX hotspot autostart + 15s health check
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/niix-hotspot-watchdog
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=default.target
+HSUEOF
+
+    systemctl --user daemon-reload 2>/dev/null || true
+    systemctl --user enable --now niix-hotspot-watchdog.service 2>/dev/null \
+        && log "Hotspot autostart + watchdog enabled for '${HOTSPOT_SSID}' (checks every 15s)" \
+        || warn "Could not enable hotspot watchdog - enable manually: systemctl --user enable --now niix-hotspot-watchdog.service"
+else
+    log "Hotspot autostart skipped - start it any time with: niix-hotspot start [SSID] [PASSWORD]"
+fi
+
+# -- Bluetooth - ensure service is running ----------------
 # Safety net: enables+starts bluetooth even on systems installed
 # before the chroot fix. Harmless if already enabled.
 sudo systemctl enable --now bluetooth 2>/dev/null || true
 
-# ── Performance profile ───────────────────────────────────
+# -- Performance profile -----------------------------------
 sudo powerprofilesctl set performance 2>/dev/null || true
 
-# ── Automatic dGPU for games on hybrid systems ────────────
-# On hybrid systems with a PROPRIETARY driver, tag the game launchers so GNOME runs
-# them on the dGPU automatically (via switcheroo-control). We deliberately skip this
-# on the nouveau path (legacy NVIDIA): launching Steam on the nouveau dGPU leaves it
-# with only a tray icon and no window, and nouveau can't reclock these cards anyway,
-# so per-game "DRI_PRIME=1 %command%" is the right tool there instead.
-if [ "$IS_HYBRID" = "true" ] && [ -z "$NVIDIA_LEGACY" ]; then
+# -- Automatic dGPU for games on hybrid systems ------------
+# Tag the game launchers so GNOME runs them on the discrete ("most powerful") GPU
+# automatically (via switcheroo-control). NVIDIA now always gets a PROPRIETARY,
+# offload-capable driver from chwd (see the GPU-driver step in PHASE 3), so this
+# applies to every hybrid system. If chwd has to fall back to nouveau, PHASE 3
+# strips these tags again so nothing points at a driver that isn't there.
+if [ "$IS_HYBRID" = "true" ]; then
     info "Configuring game launchers to use the discrete GPU automatically..."
+    # switcheroo-control was previously only installed in the NVIDIA-specific
+    # branches later in this script (PHASE 3) - on an AMD-hybrid system the
+    # package never got installed at all, so the enable/start below silently
+    # no-op'd against a unit that didn't exist. Install it here for every
+    # hybrid system regardless of vendor; harmless if PHASE 3 installs it again.
+    pac_retry -S --noconfirm --needed switcheroo-control || true
     sudo systemctl enable --now switcheroo-control.service 2>/dev/null || true
     mkdir -p "$HOME/.local/share/applications"
     for app in net.lutris.Lutris lutris heroic com.heroicgameslauncher.hgl; do
@@ -2466,7 +2858,7 @@ if [ "$IS_HYBRID" = "true" ] && [ -z "$NVIDIA_LEGACY" ]; then
     log "Game launchers set to run on the discrete GPU"
 fi
 
-# ── Gamemode config ───────────────────────────────────────
+# -- Gamemode config ---------------------------------------
 mkdir -p "$HOME/.config"
 cat > "$HOME/.config/gamemode.ini" <<'GMEOF'
 [general]
@@ -2486,17 +2878,17 @@ start = notify-send "GameMode" "Gaming optimizations ON"
 end = notify-send "GameMode" "Gaming optimizations OFF"
 GMEOF
 
-# ── Bluetooth headset audio (WirePlumber) ─────────────────
+# -- Bluetooth headset audio (WirePlumber) -----------------
 # Roles and codecs are deliberately NOT restricted here. WirePlumber's defaults
 # already enable A2DP (music) + HFP (microphone) + BAP (LE Audio) and every
 # compiled codec (aptX, aptX-HD, LDAC, AAC, LC3, ...). The old config forced
-# A2DP-only roles — which silently disabled every headset microphone — and a
+# A2DP-only roles - which silently disabled every headset microphone - and a
 # codec whitelist that blocked aptX and LC3 headsets down to plain SBC.
 # What we DO set:
-#   enable-msbc      → 16 kHz wideband mic instead of 8 kHz telephone quality
-#   enable-sbc-xq    → higher-bitrate SBC for headsets without a better codec
-#   enable-hw-volume → volume keys control the headset's own amplifier
-#   auto-connect     → bring up both music and mic profiles on connect
+#   enable-msbc      -> 16 kHz wideband mic instead of 8 kHz telephone quality
+#   enable-sbc-xq    -> higher-bitrate SBC for headsets without a better codec
+#   enable-hw-volume -> volume keys control the headset's own amplifier
+#   auto-connect     -> bring up both music and mic profiles on connect
 mkdir -p "$HOME/.config/wireplumber/wireplumber.conf.d"
 cat > "$HOME/.config/wireplumber/wireplumber.conf.d/51-bluetooth-headsets.conf" <<'BTEOF'
 monitor.bluez.properties = {
@@ -2510,10 +2902,10 @@ BTEOF
 # Remove the old restrictive config if this is a re-run
 rm -f "$HOME/.config/wireplumber/wireplumber.conf.d/51-bluetooth-fix.conf"
 
-# ── fastfetch on terminal open ────────────────────────────
+# -- fastfetch on terminal open ----------------------------
 grep -qx 'fastfetch' "$HOME/.bashrc" 2>/dev/null || echo 'fastfetch' >> "$HOME/.bashrc"
 
-# ── Steam warm-start + one-time first-launch notice ──────
+# -- Steam warm-start + one-time first-launch notice ------
 # Steam bundles a Chromium browser (steamwebhelper) that makes cold starts slow.
 #  1) Pre-load Steam minimized to the tray ~30s after login. The delay is a
 #     plain sleep so it never competes with the desktop starting up and works
@@ -2526,14 +2918,14 @@ if [ -x /usr/bin/steam ]; then
     info "Configuring Steam warm-start and first-launch notice..."
     pac_retry -S --noconfirm --needed zenity libnotify vulkan-tools || true
 
-    # ── Steam UI GPU-conformance workaround (auto-detected) ──
+    # -- Steam UI GPU-conformance workaround (auto-detected) --
     # Brand-new GPUs (e.g. RDNA 4 / RX 9000) whose Mesa/RADV driver still reports
     # itself non-conformant crash steamwebhelper's Chromium GPU process in a loop
-    # — the tray icon appears but no window ever paints. -cef-disable-gpu renders
+    # - the tray icon appears but no window ever paints. -cef-disable-gpu renders
     # ONLY Steam's UI on CPU; games are completely unaffected (they use Vulkan via
     # Proton as normal). Two independent signals; if either fires, apply it:
-    #   1. fast-path  — GPU_GEN is a known-too-new generation (rdna4)
-    #   2. runtime probe — the actually-installed Vulkan driver reports a
+    #   1. fast-path  - GPU_GEN is a known-too-new generation (rdna4)
+    #   2. runtime probe - the actually-installed Vulkan driver reports a
     #      non-conformant (0.0.0.0) conformanceVersion for the GPU
     # Self-correcting: once Mesa matures and the driver reports conformant, a
     # future reinstall's probe won't match and the flag won't be applied.
@@ -2548,52 +2940,63 @@ if [ -x /usr/bin/steam ]; then
     }
     mkdir -p "$HOME/.local/share/Steam"
     if _needs_cef_workaround; then
-        # Append idempotently — never clobber other flags the user may have added.
+        # Append idempotently - never clobber other flags the user may have added.
         touch "$HOME/.local/share/Steam/steam_dev.cfg"
         grep -qxF -- '-cef-disable-gpu' "$HOME/.local/share/Steam/steam_dev.cfg" \
             || echo '-cef-disable-gpu' >> "$HOME/.local/share/Steam/steam_dev.cfg"
-        log "Steam: UI GPU disabled (new-GPU driver not yet conformant) — games unaffected"
+        log "Steam: UI GPU disabled (new-GPU driver not yet conformant) - games unaffected"
     else
         log "Steam: GPU UI left enabled (driver reports conformant)"
     fi
 
-    # ── Per-hardware GPU environment for Steam ────────────
+    # -- Per-hardware GPU environment for Steam ------------
     # On hybrid systems, Steam (and therefore every game it launches) is started
     # with the PRIME offload environment for the detected driver stack, so games
     # render on the dGPU instead of the APU/iGPU with zero per-game setup.
-    # Written as a sourceable file so users can inspect/edit/disable it.
-    # Deliberately skipped on the nouveau path (legacy NVIDIA): running the Steam
-    # client on the nouveau dGPU leaves it tray-only with no window (see the GPU
-    # section above) — per-game "DRI_PRIME=1 %command%" is the right tool there.
+    # Written as a sourceable file so users can inspect/edit/disable it. If chwd has
+    # to fall back to nouveau (proprietary driver unavailable), the GPU-driver step in
+    # PHASE 3 removes this file again so Steam runs on the iGPU rather than aiming at a
+    # driver that isn't there.
     sudo mkdir -p /etc/niix
-    if [ "$IS_HYBRID" = "true" ] && [ -z "$NVIDIA_LEGACY" ]; then
+    if [ "$IS_HYBRID" = "true" ]; then
         if [ "$OFFLOAD_MODE" = "nvidia" ]; then
             sudo tee /etc/niix/steam-env > /dev/null <<'SENVEOF'
 # NiiX: PRIME render offload for Steam and all games it launches (NVIDIA proprietary).
-# Sourced by /usr/local/bin/steam. Delete this file to disable.
+# Sourced by /usr/local/bin/steam and /usr/local/bin/gpu-run. Delete to disable.
 export __NV_PRIME_RENDER_OFFLOAD=1
 export __GLX_VENDOR_LIBRARY_NAME=nvidia
 export __VK_LAYER_NV_optimus=NVIDIA_only
 SENVEOF
             log "Steam: games will render on the NVIDIA dGPU (PRIME offload)"
         else
-            sudo tee /etc/niix/steam-env > /dev/null <<'SENVEOF'
+            sudo tee /etc/niix/steam-env > /dev/null <<SENVEOF
 # NiiX: PRIME render offload for Steam and all games it launches (Mesa: AMD/Intel dGPU).
-# Sourced by /usr/local/bin/steam. Delete this file to disable.
-export DRI_PRIME=1
+# Sourced by /usr/local/bin/steam and /usr/local/bin/gpu-run. Delete to disable.
+export DRI_PRIME=${DRI_PRIME_TAG}
 SENVEOF
-            log "Steam: games will render on the dGPU (DRI_PRIME offload)"
+            log "Steam: games will render on the dGPU (DRI_PRIME=${DRI_PRIME_TAG})"
         fi
     else
         sudo rm -f /etc/niix/steam-env
     fi
+
+    # -- gpu-run: launch ANY app on the discrete GPU (vendor-agnostic prime-run) --
+    # Usage: gpu-run <command> [args...]   e.g.  gpu-run blender
+    # Reuses the same offload environment as the game launchers. On single-GPU
+    # systems there is nothing to offload, so it just runs the command unchanged.
+    sudo tee /usr/local/bin/gpu-run > /dev/null <<'GPRUNEOF'
+#!/bin/bash
+[ -f /etc/niix/steam-env ] && . /etc/niix/steam-env
+exec "$@"
+GPRUNEOF
+    sudo chmod +x /usr/local/bin/gpu-run
 
     mkdir -p "$HOME/.config/autostart"
     cat > "$HOME/.config/autostart/niix-steam-warmstart.desktop" <<'STEAMAUTOEOF'
 [Desktop Entry]
 Type=Application
 Name=Steam (pre-load, minimized)
-Comment=Added by NiiX first-boot — delete this file to disable
+Comment=Added by NiiX first-boot - delete this file to disable
 Exec=sh -c 'sleep 30; exec /usr/local/bin/steam -silent >/dev/null 2>&1'
 X-GNOME-Autostart-enabled=true
 STEAMAUTOEOF
@@ -2613,11 +3016,11 @@ STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/niix"
 FLAG="$STATE_DIR/steam-notice-shown"
 if [ ! -e "$FLAG" ]; then
     mkdir -p "$STATE_DIR" && touch "$FLAG"
-    MSG="Steam can take a little while to appear — especially this very first launch, while it downloads client updates and finishes setting itself up.
+    MSG="Steam can take a little while to appear - especially this very first launch, while it downloads client updates and finishes setting itself up.
 
 This is normal: Steam ships with its own built-in browser that has to start from cold each time it launches.
 
-One-time setup for the best experience: in Steam go to Settings → Compatibility, turn on \"Enable Steam Play for all other titles\", and pick Proton-CachyOS (already installed; GE-Proton is there too as an alternative) as the default tool. Steam will restart once.
+One-time setup for the best experience: in Steam go to Settings -> Compatibility, turn on \"Enable Steam Play for all other titles\", and pick Proton-CachyOS (already installed; GE-Proton is there too as an alternative) as the default tool. Steam will restart once.
 
 Tip: NiiX pre-loads Steam in the background shortly after each login, so future launches are much faster."
     if command -v zenity >/dev/null 2>&1; then
@@ -2642,10 +3045,10 @@ STEAMWRAPEOF
     fi
     log "Steam: warm-start at login + one-time first-launch notice"
 else
-    warn "Steam not found — skipping warm-start setup"
+    warn "Steam not found - skipping warm-start setup"
 fi
 
-# ── fastfetch config ──────────────────────────────────────
+# -- fastfetch config --------------------------------------
 mkdir -p "$HOME/.config/fastfetch"
 cat > "$HOME/.config/fastfetch/config.jsonc" <<'FFEOF'
 {
@@ -2655,7 +3058,7 @@ cat > "$HOME/.config/fastfetch/config.jsonc" <<'FFEOF'
     "source": "arch",
     "color": { "1": "38;5;118", "2": "38;5;205" }
   },
-  "display": { "separator": " → ", "color": { "keys": "38;5;118", "title": "38;5;205" } },
+  "display": { "separator": " -> ", "color": { "keys": "38;5;118", "title": "38;5;205" } },
   "modules": [
     { "type": "title", "format": "{user-name}@niixarch" }, "separator",
     { "type": "os", "key": "OS", "format": "NiiX Arch" },
@@ -2670,24 +3073,23 @@ cat > "$HOME/.config/fastfetch/config.jsonc" <<'FFEOF'
 FFEOF
 log "Offline config done"
 
-# ════════════════════════════════════════════════════════
-# PHASE 2 — Banner + network wait
-# ════════════════════════════════════════════════════════
+# ========================================================
+# PHASE 2 - Banner + network wait
+# ========================================================
 
 echo
-echo -e "${GREEN}  ███╗   ██╗██╗██╗██╗  ██╗ █████╗ ${PINK} ██████╗ ███████╗${NC}"
-echo -e "${GREEN}  ████╗  ██║██║██║╚██╗██╔╝██╔══██╗${PINK}██╔═══██╗██╔════╝${NC}"
-echo -e "${GREEN}  ██╔██╗ ██║██║██║ ╚███╔╝ ███████║${PINK}██║   ██║███████╗${NC}"
-echo -e "${GREEN}  ██║╚██╗██║██║██║ ██╔██╗ ██╔══██║${PINK}██║   ██║╚════██║${NC}"
-echo -e "${GREEN}  ██║ ╚████║██║██║██╔╝ ██╗██║  ██║${PINK}╚██████╔╝███████║${NC}"
-echo -e "${GREEN}  ╚═╝  ╚═══╝╚═╝╚═╝╚═╝  ╚═╝╚═╝  ╚═╝${PINK} ╚═════╝ ╚══════╝${NC}"
+    echo
+    echo -e "  ${PINK}========================================${NC}"
+    echo -e "  ${GREEN}  niiXa${PINK}OS${NC}   ${WHITE}Arch Installer${NC}"
+    echo -e "  ${PINK}========================================${NC}"
+    echo
 echo
 echo -e "  ${WHITE}${BOLD}First-Boot Setup${NC}"
-echo -e "  ${PINK}────────────────────────────────────────────────${NC}"
-echo -e "  ${CYAN}·${NC}  CachyOS kernel · AUR packages · Proton-CachyOS · NiiX desktop · wallpaper"
+echo -e "  ${PINK}------------------------------------------------${NC}"
+echo -e "  ${CYAN}-${NC}  CachyOS kernel - AUR packages - Proton-CachyOS - NiiX desktop - wallpaper"
 echo
 
-# ── Wait for network ──────────────────────────────────────
+# -- Wait for network --------------------------------------
 info "Checking network connectivity..."
 
 _nm_connected() {
@@ -2697,28 +3099,28 @@ _nm_connected() {
 if _nm_connected; then
     log "Network ready"
 else
-    info "Waiting for network connectivity (no timeout — will wait as long as needed)..."
+    info "Waiting for network connectivity (no timeout - will wait as long as needed)..."
     attempt=0
     until _nm_connected; do
         attempt=$(( attempt + 1 ))
-        echo -ne "\r  ·  Waiting for network... (attempt $attempt)"
+        echo -ne "\r  -  Waiting for network... (attempt $attempt)"
         sleep 3
     done
     echo ""
     log "Network ready"
 fi
 
-# ════════════════════════════════════════════════════════
-# PHASE 3 — Internet-dependent setup
-# ════════════════════════════════════════════════════════
+# ========================================================
+# PHASE 3 - Internet-dependent setup
+# ========================================================
 
-# ── Wallpaper ─────────────────────────────────────────────
+# -- Wallpaper ---------------------------------------------
 info "Downloading NiiX Arch wallpaper..."
 mkdir -p "$HOME/Pictures"
 curl -L --retry 5 -o "$HOME/Pictures/niix-background.png" \
     "https://niixa.org/niix-background.png" 2>/dev/null \
     && log "Wallpaper downloaded" \
-    || warn "Could not download wallpaper — set manually later"
+    || warn "Could not download wallpaper - set manually later"
 
 if [ -f "$HOME/Pictures/niix-background.png" ]; then
     gsettings set org.gnome.desktop.background picture-uri \
@@ -2729,9 +3131,9 @@ if [ -f "$HOME/Pictures/niix-background.png" ]; then
     log "Wallpaper set"
 fi
 
-# ── NiiX desktop (panel + start menu + flat icons) ───────
-# dash-to-panel (bottom taskbar) + ArcMenu (start menu, NiiX logo button) +
-# Screen Autorotate (360° laptops). Extensions are pulled
+# -- NiiX desktop (panel + apps menu + flat icons) -------
+# dash-to-panel (bottom taskbar) + built-in Apps Menu + Screen Autorotate
+# Screen Autorotate (360 deg laptops). Extensions are pulled
 # from extensions.gnome.org at the version matching the running GNOME Shell,
 # so this stays correct as GNOME updates.
 info "Installing NiiX desktop extensions..."
@@ -2758,7 +3160,6 @@ except Exception:
 
 for ext in \
     dash-to-panel@jderose9.github.com \
-    arcmenu@arcmenu.com \
     screen-rotate@shyzus.github.io
 do
     if ego_install "$ext"; then
@@ -2768,7 +3169,7 @@ do
     fi
 done
 
-# Guaranteed source fallback for the 360° auto-rotate extension (requested).
+# Guaranteed source fallback for the 360 deg auto-rotate extension (requested).
 if [ ! -d "$EXT_DIR/screen-rotate@shyzus.github.io" ]; then
     info "Installing screen-rotate from source (fallback)..."
     rm -rf /tmp/screen-autorotate
@@ -2783,16 +3184,18 @@ if [ ! -d "$EXT_DIR/screen-rotate@shyzus.github.io" ]; then
     fi
 fi
 
-# ── Configure the NiiX desktop via dconf ─────────────────
-info "Configuring NiiX panel + start menu..."
+# -- Configure the NiiX desktop via dconf -----------------
+info "Configuring NiiX panel..."
 
-# Dash to Panel — bottom Windows-style taskbar
+# Dash to Panel - bottom Windows-style taskbar
 dconf load /org/gnome/shell/extensions/dash-to-panel/ <<'DTP'
 [/]
 panel-positions='{"0":"BOTTOM"}'
 panel-sizes='{"0":44}'
 panel-lengths='{"0":100}'
-panel-anchors='{"0":"MIDDLE"}'
+panel-anchors='{"0":"LEFT"}'
+multi-monitors=false
+show-apps-button=false
 panel-element-positions='{"0":[{"element":"showAppsButton","visible":false,"position":"stackedTL"},{"element":"activitiesButton","visible":false,"position":"stackedTL"},{"element":"leftBox","visible":true,"position":"stackedTL"},{"element":"taskbar","visible":true,"position":"stackedTL"},{"element":"centerBox","visible":true,"position":"stackedBR"},{"element":"rightBox","visible":true,"position":"stackedBR"},{"element":"dateMenu","visible":true,"position":"stackedBR"},{"element":"systemMenu","visible":true,"position":"stackedBR"},{"element":"desktopButton","visible":true,"position":"stackedBR"}]}'
 dot-position='BOTTOM'
 show-appmenu=false
@@ -2806,23 +3209,8 @@ trans-use-custom-opacity=true
 trans-panel-opacity=0.9
 DTP
 
-# ArcMenu — Windows-style start menu with the NiiX logo as the button
-dconf load /org/gnome/shell/extensions/arcmenu/ <<'ARCM'
-[/]
-menu-layout='Redmond'
-position-in-panel='Left'
-menu-button-appearance='Icon_Text'
-custom-menu-button-text='NiiX'
-menu-button-icon='Custom_Icon'
-custom-menu-button-icon='/usr/share/pixmaps/niixarch-logo.png'
-custom-menu-button-icon-size=28.0
-menu-button-position-offset=0
-multi-monitor=false
-enable-menu-hotkey=true
-menu-hotkey='Super_L'
-ARCM
 
-# Screen Autorotate — sane defaults for 360° convertibles
+# Screen Autorotate - sane defaults for 360 deg convertibles
 dconf load /org/gnome/shell/extensions/screen-rotate/ <<'ROT'
 [/]
 flip-orientation=false
@@ -2834,40 +3222,47 @@ ROT
 dconf load /org/gnome/shell/ <<'SHELLD'
 [/]
 disable-user-extensions=false
-enabled-extensions=['appindicatorsupport@rgcjonas.gmail.com', 'dash-to-panel@jderose9.github.com', 'arcmenu@arcmenu.com', 'screen-rotate@shyzus.github.io', 'ddterm@amezin.github.com']
+enabled-extensions=['appindicatorsupport@rgcjonas.gmail.com', 'dash-to-panel@jderose9.github.com', 'screen-rotate@shyzus.github.io', 'ddterm@amezin.github.com', 'apps-menu@gnome-shell-extensions.gcampax.github.com', 'system-monitor@gnome-shell-extensions.gcampax.github.com']
 favorite-apps=['org.gnome.Nautilus.desktop', 'helium.desktop', 'net.lutris.Lutris.desktop', 'steam.desktop', 'heroic.desktop', 'com.stremio.Stremio.desktop']
 SHELLD
 
+# Apps Menu and System Monitor are bundled with gnome-shell-extensions
+# (already installed) - no download needed, just enable them. Same
+# belt-and-suspenders as below: dconf load above only applies after the
+# reboot at the end of this script, this flips the live setting too.
+gnome-extensions enable apps-menu@gnome-shell-extensions.gcampax.github.com 2>/dev/null || true
+gnome-extensions enable system-monitor@gnome-shell-extensions.gcampax.github.com 2>/dev/null || true
+
 log "NiiX desktop configured (fully applies after the reboot below)"
 
-# ── ArcMenu branding: apply on the NEXT login, then self-remove ─────
-# ArcMenu re-initialises its settings the first time it loads, which wipes values
-# written here. A one-shot autostart re-applies the icon + "NiiX" text once GNOME
-# Shell and ArcMenu are actually running, then deletes itself.
+# -- Dash-to-panel re-apply: apply on the NEXT login, then self-remove -----
+# Like ArcMenu before it, dash-to-panel re-initialises its own settings the
+# first time it actually loads, which silently wipes the panel-element-positions
+# (and the hidden Show Apps button) written above. A one-shot autostart
+# re-applies it once GNOME Shell and dash-to-panel are actually running.
 mkdir -p "$HOME/.local/bin" "$HOME/.config/autostart"
-cat > "$HOME/.local/bin/niix-brand-once.sh" <<'BRANDEOF'
+cat > "$HOME/.local/bin/niix-panel-once.sh" <<'PANELEOF'
 #!/bin/bash
 sleep 8
-AM=/org/gnome/shell/extensions/arcmenu
-dconf write $AM/menu-button-appearance "'Icon_Text'"
-dconf write $AM/custom-menu-button-text "'NiiX'"
-dconf write $AM/menu-button-icon "'Custom_Icon'"
-dconf write $AM/custom-menu-button-icon "'/usr/share/pixmaps/niixarch-logo.png'"
-dconf write $AM/custom-menu-button-icon-size 28.0
-rm -f "$HOME/.config/autostart/niix-brand.desktop" "$HOME/.local/bin/niix-brand-once.sh"
-BRANDEOF
-chmod +x "$HOME/.local/bin/niix-brand-once.sh"
-cat > "$HOME/.config/autostart/niix-brand.desktop" <<BRANDDT
+DTP=/org/gnome/shell/extensions/dash-to-panel
+dconf write $DTP/multi-monitors "false"
+dconf write $DTP/show-apps-button "false"
+dconf write $DTP/panel-anchors "'{\"0\":\"LEFT\"}'"
+dconf write $DTP/panel-element-positions "'{\"0\":[{\"element\":\"showAppsButton\",\"visible\":false,\"position\":\"stackedTL\"},{\"element\":\"activitiesButton\",\"visible\":false,\"position\":\"stackedTL\"},{\"element\":\"leftBox\",\"visible\":true,\"position\":\"stackedTL\"},{\"element\":\"taskbar\",\"visible\":true,\"position\":\"stackedTL\"},{\"element\":\"centerBox\",\"visible\":true,\"position\":\"stackedBR\"},{\"element\":\"rightBox\",\"visible\":true,\"position\":\"stackedBR\"},{\"element\":\"dateMenu\",\"visible\":true,\"position\":\"stackedBR\"},{\"element\":\"systemMenu\",\"visible\":true,\"position\":\"stackedBR\"},{\"element\":\"desktopButton\",\"visible\":true,\"position\":\"stackedBR\"}]}'"
+rm -f "$HOME/.config/autostart/niix-panel.desktop" "$HOME/.local/bin/niix-panel-once.sh"
+PANELEOF
+chmod +x "$HOME/.local/bin/niix-panel-once.sh"
+cat > "$HOME/.config/autostart/niix-panel.desktop" <<PANELDT
 [Desktop Entry]
 Type=Application
-Name=NiiX Branding (one-shot)
-Exec=$HOME/.local/bin/niix-brand-once.sh
+Name=NiiX Panel Fixup (one-shot)
+Exec=$HOME/.local/bin/niix-panel-once.sh
 X-GNOME-Autostart-enabled=true
 NoDisplay=true
-BRANDDT
-log "ArcMenu branding will apply on next login"
+PANELDT
+log "Dash-to-panel Show Apps fix will apply on next login"
 
-# ── CachyOS kernel ────────────────────────────────────────
+# -- CachyOS kernel ----------------------------------------
 if ! pacman -Q linux-cachyos &>/dev/null; then
     info "Setting up CachyOS repository..."
     cd /tmp
@@ -2880,7 +3275,7 @@ if ! pacman -Q linux-cachyos &>/dev/null; then
         cd ~ && rm -rf /tmp/cachyos-repo /tmp/cachyos-repo.tar.xz
     else
         cd ~
-        warn "Could not download/extract the CachyOS repo installer — staying on the stock kernel."
+        warn "Could not download/extract the CachyOS repo installer - staying on the stock kernel."
         warn "Re-run later: bash /usr/local/bin/niixarch-firstboot.sh"
     fi
 
@@ -2890,22 +3285,22 @@ if ! pacman -Q linux-cachyos &>/dev/null; then
     info "Ranking CachyOS mirrors (avoids the stale cdn77 default)..."
     pac_retry -Sy --noconfirm --needed cachyos-rate-mirrors || true
     if command -v cachyos-rate-mirrors >/dev/null 2>&1; then
-        sudo cachyos-rate-mirrors || warn "Mirror ranking failed — continuing with current mirrors."
+        sudo cachyos-rate-mirrors || warn "Mirror ranking failed - continuing with current mirrors."
     fi
     info "Completing CachyOS system upgrade..."
     pac_retry -Syu --noconfirm \
-        || warn "System upgrade incomplete — run 'sudo cachyos-rate-mirrors && sudo pacman -Syu' once mirrors sync."
+        || warn "System upgrade incomplete - run 'sudo cachyos-rate-mirrors && sudo pacman -Syu' once mirrors sync."
 
     info "Installing CachyOS kernel..."
     pac_retry -Sy --noconfirm --needed linux-cachyos linux-cachyos-headers \
-        || warn "CachyOS kernel install failed — staying on the stock linux kernel for now."
+        || warn "CachyOS kernel install failed - staying on the stock linux kernel for now."
 
-    # ── Only switch initramfs hooks if the CachyOS kernel is really installed ──
+    # -- Only switch initramfs hooks if the CachyOS kernel is really installed --
     # sd-encrypt reads rd.luks.name= and IGNORES cryptdevice=. The Limine config
     # is only converted to rd.luks.name= further below (and only when
     # /boot/vmlinuz-linux-cachyos exists). If the kernel install failed and we
     # switched hooks anyway, the stock kernel's initramfs would be rebuilt with
-    # sd-encrypt while Limine still passes cryptdevice= — no LUKS prompt, no boot.
+    # sd-encrypt while Limine still passes cryptdevice= - no LUKS prompt, no boot.
     if pacman -Q linux-cachyos &>/dev/null; then
         log "CachyOS kernel installed"
         info "Switching to systemd initramfs hooks for CachyOS..."
@@ -2921,49 +3316,101 @@ MKEOF
         sudo mkinitcpio -P
         log "initramfs rebuilt with systemd hooks"
     else
-        warn "linux-cachyos not installed — keeping the stock kernel and its encrypt-hook initramfs."
-    fi
-
-    # ── GPU drivers ──────────────────────────────────────────
-    # Strategy:
-    #   • Legacy NVIDIA (Maxwell/Pascal/Kepler) → the in-kernel NOUVEAU driver. It
-    #     supports these cards AND PRIME offload, runs fine under Wayland, and has
-    #     none of the proprietary/DKMS/kernel-version fragility that loops the login
-    #     on these old GPUs. No proprietary driver is installed.
-    #   • Everything else (modern NVIDIA Turing+, AMD, Intel) → CachyOS hardware
-    #     detection (chwd), which installs the right tested profile.
-    # Either way the iGPU drives the display under Wayland and the dGPU is reached via
-    # switcheroo offload — no X11, no driver that can crash the session.
-    if [ "$GPU_VENDOR" = "nvidia" ] && [ -n "$NVIDIA_LEGACY" ]; then
-        info "Legacy NVIDIA ($GPU_GEN) → nouveau (open, in-kernel, Wayland-friendly)..."
-        pac_retry -S --noconfirm --needed \
-            mesa lib32-mesa vulkan-nouveau lib32-vulkan-nouveau \
-            vulkan-icd-loader lib32-vulkan-icd-loader \
-            vulkan-mesa-layers lib32-vulkan-mesa-layers \
-            switcheroo-control \
-            || warn "Some nouveau/Vulkan packages failed — desktop should still work."
-        # Make absolutely sure nothing blacklists nouveau or forces the proprietary path.
-        sudo rm -f /etc/modprobe.d/no-nvidia.conf /etc/modprobe.d/niix-disable-nvidia.conf \
-                   /etc/modprobe.d/nouveau-blacklist.conf /etc/modules-load.d/nvidia.conf \
-                   /etc/modprobe.d/nvidia.conf 2>/dev/null || true
-        sudo systemctl enable switcheroo-control.service 2>/dev/null || true
-        log "Legacy NVIDIA configured for nouveau + PRIME offload (Wayland)"
-    else
-        info "Detecting and installing GPU drivers (CachyOS chwd)..."
-        pac_retry -S --noconfirm --needed chwd || true
-        if command -v chwd >/dev/null 2>&1; then
-            sudo chwd -a 0300 || warn "chwd autoconfigure reported issues (see 'sudo chwd --list')."
-            log "chwd GPU configuration complete"
-        else
-            warn "chwd unavailable from the CachyOS repo — GPU drivers not auto-configured."
-            warn "Run manually once online: sudo pacman -S chwd && sudo chwd -a 0300"
-        fi
+        warn "linux-cachyos not installed - keeping the stock kernel and its encrypt-hook initramfs."
     fi
 else
     log "CachyOS kernel already installed"
 fi
 
-# ── LAVD scheduler ────────────────────────────────────────
+# -- GPU drivers ------------------------------------------
+# Gated on its own completion marker, NOT on "is the kernel installed" - the
+# two are unrelated. If chwd failed on a mirror blip during an earlier run,
+# the CachyOS kernel could already be present (so the outer kernel-install
+# branch above gets skipped on a re-run) while GPU driver setup never
+# actually succeeded. Without an independent marker, a re-run of firstboot
+# would silently skip this step forever since it used to live inside that
+# now-skipped branch.
+# Strategy:
+#   * Legacy NVIDIA (Maxwell/Pascal/Kepler) -> the in-kernel NOUVEAU driver. It
+#     supports these cards AND PRIME offload, runs fine under Wayland, and has
+#     none of the proprietary/DKMS/kernel-version fragility that loops the login
+#     on these old GPUs. No proprietary driver is installed.
+#   * Everything else (modern NVIDIA Turing+, AMD, Intel) -> CachyOS hardware
+#     detection (chwd), which installs the right tested profile.
+# Either way the iGPU drives the display under Wayland and the dGPU is reached via
+# switcheroo offload - no X11, no driver that can crash the session.
+GPU_MARKER=/etc/niix/.chwd-configured
+if [ ! -f "$GPU_MARKER" ]; then
+    info "Detecting and installing GPU drivers (CachyOS chwd)..."
+    # chwd auto-selects the correct, offload-capable driver for the detected card:
+    #   NVIDIA Turing+ -> nvidia-open-dkms    Maxwell/Pascal -> nvidia-dkms-580xx
+    #   NVIDIA Kepler  -> nvidia-dkms-470xx    AMD / Intel    -> Mesa profile
+    # Every NVIDIA proprietary profile supports PRIME render offload, so the discrete
+    # ("most powerful") GPU is actually usable for games. We take the proprietary path
+    # for ALL NVIDIA generations and keep nouveau ONLY as a boot fallback for the case
+    # where the proprietary driver never gets installed (offline / repo missing).
+    pac_retry -S --noconfirm --needed chwd || true
+    CHWD_OK=false
+    if command -v chwd >/dev/null 2>&1; then
+        # Retry once (force) on failure - first-boot mirror/CDN blips are common.
+        if sudo chwd -a 0300 || { sleep 3; sudo chwd -f -a 0300; }; then
+            log "chwd GPU configuration complete"
+            CHWD_OK=true
+        else
+            warn "chwd autoconfigure reported issues (see 'sudo chwd --list')."
+        fi
+    else
+        warn "chwd unavailable from the CachyOS repo - will fall back to nouveau below."
+    fi
+
+    if [ "$GPU_VENDOR" = "nvidia" ]; then
+        # nvidia-utils is pulled in ONLY by chwd's proprietary profiles, never by the
+        # nouveau profile - so its presence is a reliable signal that offload will work.
+        if pacman -Qq nvidia-utils >/dev/null 2>&1; then
+            # Proprietary path confirmed: ensure the offload helper + switcheroo are
+            # present and that nothing blacklists the NVIDIA module.
+            pac_retry -S --noconfirm --needed nvidia-prime switcheroo-control \
+                vulkan-icd-loader lib32-vulkan-icd-loader || true
+            sudo systemctl enable switcheroo-control.service 2>/dev/null || true
+            sudo rm -f /etc/modprobe.d/no-nvidia.conf /etc/modprobe.d/niix-disable-nvidia.conf \
+                       /etc/modprobe.d/nouveau-blacklist.conf 2>/dev/null || true
+            log "NVIDIA proprietary driver installed - dGPU available via PRIME offload"
+        else
+            # Fallback: proprietary never landed. Install nouveau so the desktop still
+            # boots, and neutralise the offload wiring so games don't aim at a driver
+            # that isn't there. (Re-run 'sudo chwd -a 0300' once online to enable it.)
+            warn "NVIDIA proprietary driver not installed - falling back to nouveau."
+            pac_retry -S --noconfirm --needed \
+                mesa lib32-mesa vulkan-nouveau lib32-vulkan-nouveau \
+                vulkan-icd-loader lib32-vulkan-icd-loader switcheroo-control \
+                || warn "Some nouveau/Vulkan packages failed - desktop should still work."
+            sudo systemctl enable switcheroo-control.service 2>/dev/null || true
+            sudo rm -f /etc/mkinitcpio.conf.d/10-chwd.conf 2>/dev/null || true
+            sudo rm -f /etc/niix/steam-env 2>/dev/null || true
+            for _d in "$HOME/.local/share/applications"/*.desktop; do
+                [ -f "$_d" ] || continue
+                sed -i '/^PrefersNonDefaultGPU=/d; /^X-KDE-RunOnDiscreteGpu=/d' "$_d" 2>/dev/null || true
+            done
+            warn "Re-run 'sudo chwd -a 0300' once online to enable the NVIDIA dGPU."
+        fi
+
+        # One-time visibility so the user can confirm the dGPU was detected.
+        command -v nvidia-smi >/dev/null 2>&1 \
+            && log "dGPU: $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || echo 'NVIDIA (loads after reboot)')"
+    fi
+
+    # Only mark this step done if chwd actually succeeded (or wasn't needed,
+    # e.g. non-NVIDIA where a Mesa profile install is enough) - a hard chwd
+    # failure should let the NEXT firstboot re-run try again, not skip forever.
+    if [ "$CHWD_OK" = "true" ] || [ "$GPU_VENDOR" != "nvidia" ]; then
+        sudo mkdir -p /etc/niix
+        sudo touch "$GPU_MARKER"
+    fi
+else
+    log "GPU drivers already configured (chwd) - skipping"
+fi
+
+# -- LAVD scheduler ----------------------------------------
 if ! pacman -Q scx-scheds &>/dev/null; then
     info "Installing LAVD scheduler..."
     pac_retry -S --noconfirm --needed scx-scheds
@@ -2975,10 +3422,10 @@ if ! pacman -Q scx-scheds &>/dev/null; then
     fi
 fi
 
-# ── Create @clean bootable fallback subvolume ─────────────
+# -- Create @clean bootable fallback subvolume -------------
 # Runs BEFORE the Limine update so the "clean state" menu entry is only ever
 # written when the @clean subvolume really exists. All btrfs/mount operations
-# need root — this script runs as the regular user, so sudo is mandatory here
+# need root - this script runs as the regular user, so sudo is mandatory here
 # (without it the mount fails silently and @clean is never created).
 info "Creating @clean Btrfs fallback snapshot..."
 CLEAN_OK=false
@@ -2989,17 +3436,17 @@ if sudo mount -o subvol=/ "$MAPPER_DEV" "$TMP_MNT" 2>/dev/null; then
         && sudo btrfs subvolume delete "$TMP_MNT/@clean" 2>/dev/null
     if sudo btrfs subvolume snapshot "$TMP_MNT/@" "$TMP_MNT/@clean"; then
         CLEAN_OK=true
-        log "@clean snapshot created — bootable from Limine as 'NiiX Arch (clean state)'"
+        log "@clean snapshot created - bootable from Limine as 'NiiX Arch (clean state)'"
     else
-        warn "@clean snapshot failed — run later: sudo niixarch-refresh-clean"
+        warn "@clean snapshot failed - run later: sudo niixarch-refresh-clean"
     fi
     sudo umount "$TMP_MNT"
 else
-    warn "Could not mount Btrfs top-level — @clean skipped, run: sudo niixarch-refresh-clean"
+    warn "Could not mount Btrfs top-level - @clean skipped, run: sudo niixarch-refresh-clean"
 fi
 rmdir "$TMP_MNT" 2>/dev/null || true
 
-# ── Update Limine for CachyOS + @clean ───────────────────
+# -- Update Limine for CachyOS + @clean -------------------
 LIMINE_UPDATED=false
 if [ -f /boot/vmlinuz-linux-cachyos ]; then
     info "Updating Limine config..."
@@ -3026,7 +3473,7 @@ if [ -f /boot/vmlinuz-linux-cachyos ]; then
             WIN_ENTRY=""
         fi
 
-        # Only offer the clean-state entry if the snapshot actually exists —
+        # Only offer the clean-state entry if the snapshot actually exists -
         # otherwise selecting it would fail to mount root and drop to emergency.
         CLEAN_ENTRY=""
         if [ "$CLEAN_OK" = "true" ]; then
@@ -3068,33 +3515,51 @@ LIMEOF
         rm "$TMPFILE"
         if [ "$copied" -gt 0 ]; then
             LIMINE_UPDATED=true
-            log "Limine updated ($copied locations) — CachyOS kernel$([ "$CLEAN_OK" = "true" ] && echo ' · @clean fallback')"
+            log "Limine updated ($copied locations) - CachyOS kernel$([ "$CLEAN_OK" = "true" ] && echo ' - @clean fallback')"
         else
-            warn "Could not write any Limine config — update Limine manually before rebooting"
+            warn "Could not write any Limine config - update Limine manually before rebooting"
         fi
     else
-        warn "Could not find limine config — update Limine manually"
+        warn "Could not find limine config - update Limine manually"
     fi
 else
     warn "CachyOS kernel not found at /boot/vmlinuz-linux-cachyos"
 fi
 
-# ── Remove stock linux kernel ─────────────────────────────
-# Only safe once BOTH are true: the CachyOS kernel is installed AND Limine now
-# points at it. Removing 'linux' unconditionally could leave the machine with
-# no kernel at all right before the automatic reboot below.
-if pacman -Q linux-cachyos &>/dev/null \
-    && [ -f /boot/vmlinuz-linux-cachyos ] \
-    && [ "$LIMINE_UPDATED" = "true" ]; then
-    info "Removing stock linux kernel..."
-    sudo pacman -Rns --noconfirm linux linux-headers 2>/dev/null \
-        && log "Stock kernel removed — CachyOS only" \
-        || warn "Could not remove stock kernel — run: sudo pacman -Rns linux linux-headers"
+# -- Remove stock linux kernel -----------------------------
+# Only safe once ALL of these are true: the CachyOS kernel is installed,
+# Limine now points at it, its initramfs actually exists, AND that initramfs
+# was actually built with the sd-encrypt hook. The hooks switch (HOOKS=...
+# above) happens before this point but mkinitcpio can fail silently on a
+# mirror blip or a bad hook name - checking only "does the kernel file
+# exist" doesn't catch a broken/stale initramfs missing LUKS support, which
+# combined with removing the fallback kernel is exactly how you get an
+# unbootable encrypted system.
+INITRAMFS_OK=false
+if [ -f /boot/initramfs-linux-cachyos.img ]; then
+    if command -v lsinitcpio &>/dev/null \
+        && lsinitcpio /boot/initramfs-linux-cachyos.img 2>/dev/null | grep -qi "systemd-cryptsetup"; then
+        INITRAMFS_OK=true
+    else
+        warn "Could not confirm sd-encrypt/systemd-cryptsetup is present in the CachyOS initramfs"
+    fi
 else
-    warn "Keeping the stock linux kernel (CachyOS kernel or Limine update not confirmed)."
+    warn "CachyOS initramfs not found at /boot/initramfs-linux-cachyos.img"
 fi
 
-# ── niixarch-refresh-clean helper ────────────────────────
+if pacman -Q linux-cachyos &>/dev/null \
+    && [ -f /boot/vmlinuz-linux-cachyos ] \
+    && [ "$LIMINE_UPDATED" = "true" ] \
+    && [ "$INITRAMFS_OK" = "true" ]; then
+    info "Removing stock linux kernel..."
+    sudo pacman -Rns --noconfirm linux linux-headers 2>/dev/null \
+        && log "Stock kernel removed - CachyOS only" \
+        || warn "Could not remove stock kernel - run: sudo pacman -Rns linux linux-headers"
+else
+    warn "Keeping the stock linux kernel (CachyOS kernel, Limine update, or initramfs LUKS support not confirmed)."
+fi
+
+# -- niixarch-refresh-clean helper ------------------------
 sudo tee /usr/local/bin/niixarch-refresh-clean > /dev/null <<'REFRESHEOF'
 #!/bin/bash
 echo "Refreshing @clean snapshot to current system state..."
@@ -3106,11 +3571,11 @@ btrfs subvolume show "$TMP_MNT/@clean" &>/dev/null \
 btrfs subvolume snapshot "$TMP_MNT/@" "$TMP_MNT/@clean"
 umount "$TMP_MNT"
 rmdir "$TMP_MNT"
-echo "Done — 'NiiX Arch (clean state)' in Limine now reflects current system."
+echo "Done - 'NiiX Arch (clean state)' in Limine now reflects current system."
 REFRESHEOF
 sudo chmod +x /usr/local/bin/niixarch-refresh-clean
 
-# ── yay ───────────────────────────────────────────────────
+# -- yay ---------------------------------------------------
 if ! command -v yay &>/dev/null; then
     info "Installing yay (AUR helper)..."
     cd /tmp && rm -rf yay
@@ -3131,7 +3596,7 @@ aur_install() {
     return 1
 }
 
-# ── AUR packages ──────────────────────────────────────────
+# -- AUR packages ------------------------------------------
 info "Installing AUR packages..."
 aur_install dxvk-mingw || true
 aur_install ananicy-rules-git || true
@@ -3147,15 +3612,15 @@ if aur_install gnome-shell-extension-ddterm; then
     dconf write /com/github/amezin/ddterm/hide-when-focus-lost false 2>/dev/null || true
     log "ddterm drop-down terminal installed (F12 / Ctrl+Alt+T)"
 else
-    warn "ddterm failed to install from the AUR — drop-down terminal unavailable."
+    warn "ddterm failed to install from the AUR - drop-down terminal unavailable."
 fi
 log "AUR packages done"
 
 # NVIDIA drivers (modern + legacy 580xx/470xx), Optimus/PRIME, switcheroo-control and
-# nvidia-prime are all handled earlier by CachyOS hardware detection (chwd) — no custom
+# nvidia-prime are all handled earlier by CachyOS hardware detection (chwd) - no custom
 # NVIDIA driver logic here anymore.
 
-# ── Flatpak ───────────────────────────────────────────────
+# -- Flatpak -----------------------------------------------
 info "Installing Flatpak apps..."
 # sudo: a system-wide flatpak install from a user session pops an interactive
 # polkit password dialog, which stalls the unattended first-boot flow.
@@ -3164,50 +3629,113 @@ sudo flatpak remote-add --if-not-exists flathub \
 sudo flatpak install -y flathub com.stremio.Stremio || true
 log "Flatpak apps installed"
 
-# ── Proton-CachyOS (recommended default) ─────────────────
+# -- Proton-CachyOS (recommended default) -----------------
 # From the CachyOS repos enabled above: Proton 11 base with NTSync enabled by
 # default (the ntsync kernel module is already loaded by the installer), plus
 # per-game upscaler DLL upgrades (PROTON_FSR4_UPGRADE / PROTON_DLSS_UPGRADE /
 # PROTON_XESS_UPGRADE) and winewayland improvements. umu-launcher lets Lutris
 # and Heroic use the same Proton builds. Fails gracefully if the CachyOS repos
-# never came up — GE-Proton below remains the fallback.
+# never came up - GE-Proton below remains the fallback.
 info "Installing Proton-CachyOS + umu-launcher..."
 pac_retry -S --noconfirm --needed proton-cachyos umu-launcher \
-    && log "Proton-CachyOS installed — recommended default in Steam → Settings → Compatibility" \
-    || warn "Proton-CachyOS not available (CachyOS repos missing?) — use GE-Proton instead"
+    && log "Proton-CachyOS installed - recommended default in Steam -> Settings -> Compatibility" \
+    || warn "Proton-CachyOS not available (CachyOS repos missing?) - use GE-Proton instead"
 
-# ── GE-Proton ─────────────────────────────────────────────
+# -- GE-Proton ---------------------------------------------
 info "Installing latest GE-Proton..."
-GEPROTON_TAG=$(curl -s "https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases/latest" | grep tag_name | cut -d\" -f4)
+GEPROTON_TAG=$(curl -fsS "https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases/latest" | grep tag_name | cut -d\" -f4)
 if [ -n "$GEPROTON_TAG" ]; then
     COMPAT_DIR="$HOME/.local/share/Steam/compatibilitytools.d"
     mkdir -p "$COMPAT_DIR"
     if [ ! -d "$COMPAT_DIR/$GEPROTON_TAG" ]; then
-        curl -L --retry 5 -o "/tmp/${GEPROTON_TAG}.tar.gz" \
-            "https://github.com/GloriousEggroll/proton-ge-custom/releases/download/${GEPROTON_TAG}/${GEPROTON_TAG}.tar.gz"
-        tar -xzf "/tmp/${GEPROTON_TAG}.tar.gz" -C "$COMPAT_DIR"
-        rm "/tmp/${GEPROTON_TAG}.tar.gz"
-        log "GE-Proton $GEPROTON_TAG installed"
+        _ge_base="https://github.com/GloriousEggroll/proton-ge-custom/releases/download/${GEPROTON_TAG}"
+        # Download the tarball AND its sha512sum, verify before extracting - never
+        # unpack an unverified archive into the Steam runtime.
+        if curl -fL --retry 5 -o "/tmp/${GEPROTON_TAG}.tar.gz"     "${_ge_base}/${GEPROTON_TAG}.tar.gz" \
+        && curl -fL --retry 5 -o "/tmp/${GEPROTON_TAG}.sha512sum" "${_ge_base}/${GEPROTON_TAG}.sha512sum" \
+        && ( cd /tmp && sha512sum -c "${GEPROTON_TAG}.sha512sum" ) \
+        && tar -xzf "/tmp/${GEPROTON_TAG}.tar.gz" -C "$COMPAT_DIR"; then
+            log "GE-Proton $GEPROTON_TAG installed (sha512 verified)"
+        else
+            warn "GE-Proton download or checksum verification failed - skipped (use ProtonUp-Qt later)"
+        fi
+        rm -f "/tmp/${GEPROTON_TAG}.tar.gz" "/tmp/${GEPROTON_TAG}.sha512sum"
     fi
 else
-    warn "Could not fetch GE-Proton — install via ProtonUp-Qt later"
+    warn "Could not fetch GE-Proton - install via ProtonUp-Qt later"
 fi
 
-# ── NiiX icons for AUR/flatpak apps just installed ───────
+# -- NiiX icons for AUR/flatpak apps just installed -------
 info "Generating NiiX icons for newly installed apps..."
 sudo /usr/local/bin/niix-iconify --quiet 2>/dev/null || true
 log "App icons reconciled"
 
-# Hide GNOME's one-time welcome tour from the menu (kept installed; just hidden)
-/usr/local/bin/niix-hide-app org.gnome.Tour >/dev/null 2>&1 || true
+# -- Hide everything except the requested visible app set ------
+# Visible set kept in the menu: Calculator, VLC, Disks, Clocks, Calendar,
+# Text Editor, Software, Settings, Image Viewer, Extensions, Document Viewer
+# (Papers), Tweaks.
+#
+# Try the real desktop ID first (reliable, doesn't depend on wording), then
+# fall back to a case-insensitive SUBSTRING match on Name (not an exact
+# anchored match - upstream Name fields often differ from what shows in the
+# menu, e.g. Totem's Name is "Videos" not "Video Player", gnome-music's is
+# "Music" not "Audio Player", baobab's is "Disk Usage Analyzer" with a z).
+# Runs un-privileged as the real user so it writes to the real $HOME - do not
+# wrap this whole script in sudo, or the override lands in /root instead.
+info "Hiding non-essential apps from the menu..."
+niix_hide_by_id_or_name() {
+    local id="$1" name="$2" found=""
+    for dir in /usr/share/applications /var/lib/flatpak/exports/share/applications; do
+        [ -f "${dir}/${id}.desktop" ] && { found="$id"; break; }
+    done
+    if [ -z "$found" ]; then
+        found=$(grep -ils "^Name=.*${name}" /usr/share/applications/*.desktop \
+             /var/lib/flatpak/exports/share/applications/*.desktop 2>/dev/null \
+             | head -1 | xargs -r basename -s .desktop)
+    fi
+    [ -n "$found" ] && /usr/local/bin/niix-hide-app "$found" >/dev/null 2>&1
+}
 
-# ── Pin apps to GNOME Dash ──────────────────────────────
+# id_guess::name_substring (id tried first, name is a case-insensitive fallback)
+for pair in \
+    "org.gnome.Music::Music" \
+    "bssh::Avahi SSH Server Browser" \
+    "bvnc::Avahi VNC Server Browser" \
+    "avahi-discover::Avahi Zeroconf Browser" \
+    "org.gnome.Snapshot::Camera" \
+    "org.corectrl.CoreCtrl::CoreCtrl" \
+    "com.github.amezin.ddterm::ddterm" \
+    "org.gnome.baobab::Disk Usage Analy" \
+    "lstopo::Hardware Locality" \
+    "org.gnome.Logs::Logs" \
+    "org.freedesktop.MalcontentControl::Parental Controls" \
+    "net.davidotek.pupgui2::ProtonUp" \
+    "assistant::Qt Assistant" \
+    "qdbusviewer::Qt D-Bus Viewer" \
+    "linguist::Qt Linguist" \
+    "qv4l2::Qt V4L2 test" \
+    "qvidcap::Qt V4L2 video capture" \
+    "designer::Qt Widgets Designer" \
+    "org.gnome.SystemMonitor::System Monitor" \
+    "org.gnome.Terminal::Terminal" \
+    "org.gnome.Console::Console" \
+    "org.gnome.Totem::Video" \
+    "vim::Vim" \
+    "org.gnome.Weather::Weather" \
+    "winetricks::Winetricks" \
+    "org.gnome.Tour::Tour"
+do
+    niix_hide_by_id_or_name "${pair%%::*}" "${pair##*::}"
+done
+log "Menu cleaned up - only the requested apps are visible"
+
+# -- Pin apps to GNOME Dash ------------------------------
 # Desktop IDs confirmed from live system ls /usr/share/applications/:
 #   helium.desktop              (helium-browser-bin AUR)
 #   heroic.desktop              (heroic-games-launcher-bin AUR)
 #   steam.desktop               (steam AUR)
 #   com.stremio.Stremio.desktop (Stremio Flatpak)
-# gsettings is unreliable from a terminal — no dconf session daemon.
+# gsettings is unreliable from a terminal - no dconf session daemon.
 # dconf system override writes to the filesystem directly, no session needed.
 info "Pinning apps to GNOME Dash via dconf system override..."
 sudo mkdir -p /etc/dconf/db/local.d /etc/dconf/profile
@@ -3218,7 +3746,7 @@ sudo tee /etc/dconf/db/local.d/00-niixarch-dash > /dev/null << 'DCONFEOF'
 [org/gnome/shell]
 favorite-apps=['org.gnome.Nautilus.desktop', 'helium.desktop', 'net.lutris.Lutris.desktop', 'steam.desktop', 'heroic.desktop', 'com.stremio.Stremio.desktop']
 disable-user-extensions=false
-enabled-extensions=['appindicatorsupport@rgcjonas.gmail.com', 'dash-to-panel@jderose9.github.com', 'arcmenu@arcmenu.com', 'screen-rotate@shyzus.github.io', 'ddterm@amezin.github.com']
+enabled-extensions=['appindicatorsupport@rgcjonas.gmail.com', 'dash-to-panel@jderose9.github.com', 'screen-rotate@shyzus.github.io', 'ddterm@amezin.github.com', 'apps-menu@gnome-shell-extensions.gcampax.github.com', 'system-monitor@gnome-shell-extensions.gcampax.github.com']
 
 [org/gnome/desktop/interface]
 color-scheme='prefer-dark'
@@ -3226,28 +3754,29 @@ accent-color='pink'
 icon-theme='NiiX'
 DCONFEOF
 sudo dconf update 2>/dev/null \
-    && log "Dash pinned: Nautilus · Helium · Lutris · Steam · Heroic · Stremio" \
-    || warn "dconf update failed — Dash pinning may not apply"
+    && log "Dash pinned: Nautilus - Helium - Lutris - Steam - Heroic - Stremio" \
+    || warn "dconf update failed - Dash pinning may not apply"
 
-# ── Cleanup ───────────────────────────────────────────────
+# -- Cleanup -----------------------------------------------
 sudo rm -f /etc/xdg/autostart/niixarch-firstboot.desktop
 sudo rm -f /etc/sudoers.d/niixarch-firstboot   # remove temporary passwordless sudo
 sudo touch /var/lib/niixarch-firstboot-done
 
 echo ""
-echo -e "  ${GREEN}✓${NC}  ${WHITE}${BOLD}First-boot setup complete!${NC}"
-echo -e "  ${PINK}────────────────────────────────────────────────${NC}"
-echo -e "  ${CYAN}·${NC}  Steam: dGPU is automatic on hybrid systems · optional extras: ${GREEN}gamemoderun mangohud %command%${NC}"
-echo -e "  ${CYAN}·${NC}  Steam one-time: Settings → Compatibility → Steam Play for all titles → ${GREEN}Proton-CachyOS${NC}"
-echo -e "  ${CYAN}·${NC}  FreeSync/G-Sync monitor? Settings → Displays → enable ${GREEN}Variable Refresh Rate${NC}"
-echo -e "  ${CYAN}·${NC}  Phone-friendly Wi-Fi hotspot: ${GREEN}niix-hotspot start${NC}"
-echo -e "  ${CYAN}·${NC}  Refresh clean snapshot: ${GREEN}sudo niixarch-refresh-clean${NC}"
-echo -e "  ${CYAN}·${NC}  Log saved to: $LOG"
+echo -e "  ${GREEN}+${NC}  ${WHITE}${BOLD}First-boot setup complete!${NC}"
+echo -e "  ${PINK}------------------------------------------------${NC}"
+echo -e "  ${CYAN}-${NC}  Steam: dGPU is automatic on hybrid systems - optional extras: ${GREEN}gamemoderun mangohud %command%${NC}"
+echo -e "  ${CYAN}-${NC}  Run any app on the dGPU: ${GREEN}gpu-run <app>${NC}  (e.g. gpu-run blender)"
+echo -e "  ${CYAN}-${NC}  Steam one-time: Settings -> Compatibility -> Steam Play for all titles -> ${GREEN}Proton-CachyOS${NC}"
+echo -e "  ${CYAN}-${NC}  FreeSync/G-Sync monitor? Settings -> Displays -> enable ${GREEN}Variable Refresh Rate${NC}"
+echo -e "  ${CYAN}-${NC}  Phone-friendly Wi-Fi hotspot: ${GREEN}niix-hotspot start${NC}"
+echo -e "  ${CYAN}-${NC}  Refresh clean snapshot: ${GREEN}sudo niixarch-refresh-clean${NC}"
+echo -e "  ${CYAN}-${NC}  Log saved to: $LOG"
 echo ""
 warn "Rebooting in 10 seconds to load the CachyOS kernel..."
 info "Press Ctrl+C to cancel."
 for i in 10 9 8 7 6 5 4 3 2 1; do
-    echo -ne "\r  ·  Rebooting in ${i}s... "
+    echo -ne "\r  -  Rebooting in ${i}s... "
     sleep 1
 done
 echo ""
@@ -3256,7 +3785,7 @@ FBEOF
 
     chmod +x /mnt/usr/local/bin/niixarch-firstboot.sh
 
-    # ── Launcher wrapper ──────────────────────────────────
+    # -- Launcher wrapper ----------------------------------
     # A separate script handles terminal detection and the done-file guard.
     # This avoids shell quoting issues inside the .desktop Exec field.
     cat > /mnt/usr/local/bin/niixarch-firstboot-launcher.sh <<'LAUNCHEOF'
@@ -3278,11 +3807,11 @@ fi
 LAUNCHEOF
     chmod +x /mnt/usr/local/bin/niixarch-firstboot-launcher.sh
 
-    # ── Autostart .desktop ────────────────────────────────
-    # Exec points directly to the launcher — no shell quoting needed.
+    # -- Autostart .desktop --------------------------------
+    # Exec points directly to the launcher - no shell quoting needed.
     # NoDisplay=false  : ensures GNOME's autostart actually processes it.
     # Terminal=false   : launcher opens its own terminal; don't wrap in another.
-    # OnlyShowIn left out intentionally — the restriction can silently block
+    # OnlyShowIn left out intentionally - the restriction can silently block
     # the entry if XDG_CURRENT_DESKTOP doesn't match the exact string.
     mkdir -p /mnt/etc/xdg/autostart
     cat > /mnt/etc/xdg/autostart/niixarch-firstboot.desktop <<'DTEOF'
@@ -3298,39 +3827,38 @@ DTEOF
     log "First-boot script installed (runs automatically on first login)"
 }
 
-# ── Step 12: Done ────────────────────────────────────────────
+# -- Step 12: Done --------------------------------------------
 finish() {
     hr "Complete"
     echo
-    echo -e "${GREEN}  ███╗   ██╗██╗██╗██╗  ██╗ █████╗ ${PINK} ██████╗ ███████╗${NC}"
-    echo -e "${GREEN}  ████╗  ██║██║██║╚██╗██╔╝██╔══██╗${PINK}██╔═══██╗██╔════╝${NC}"
-    echo -e "${GREEN}  ██╔██╗ ██║██║██║ ╚███╔╝ ███████║${PINK}██║   ██║███████╗${NC}"
-    echo -e "${GREEN}  ██║╚██╗██║██║██║ ██╔██╗ ██╔══██║${PINK}██║   ██║╚════██║${NC}"
-    echo -e "${GREEN}  ██║ ╚████║██║██║██╔╝ ██╗██║  ██║${PINK}╚██████╔╝███████║${NC}"
-    echo -e "${GREEN}  ╚═╝  ╚═══╝╚═╝╚═╝╚═╝  ╚═╝╚═╝  ╚═╝${PINK} ╚═════╝ ╚══════╝${NC}"
+    echo
+    echo -e "  ${PINK}========================================${NC}"
+    echo -e "  ${GREEN}  niiXa${PINK}OS${NC}   ${WHITE}Arch Installer${NC}"
+    echo -e "  ${PINK}========================================${NC}"
+    echo
     echo
     echo -e "  ${GREEN}installation complete!${NC}"
-    echo -e "  ${PINK}────────────────────────────────────────────────────────${NC}"
+    echo -e "  ${PINK}--------------------------------------------------------${NC}"
     echo
     echo -e "  ${DIM}Logs are saved next, then you'll be prompted to reboot.${NC}"
     echo -e "  ${DIM}Remove the USB when the screen goes blank after reboot.${NC}"
     echo
-    echo -e "  ${PINK}── At the Limine menu ────────────────────────────${NC}"
+    echo -e "  ${PINK}-- At the Limine menu ----------------------------${NC}"
     echo
-    echo -e "  ${GREEN}✓${NC}  ${WHITE}NiiX Arch${NC}              → LUKS passphrase → GDM login"
-    echo -e "  ${GREEN}✓${NC}  ${WHITE}NiiX Arch (clean state)${NC} → boots @clean fallback (after first-boot)"
+    echo -e "  ${GREEN}+${NC}  ${WHITE}NiiX Arch${NC}              -> LUKS passphrase -> GDM login"
+    echo -e "  ${GREEN}+${NC}  ${WHITE}NiiX Arch (clean state)${NC} -> boots @clean fallback (after first-boot)"
     if [[ "$INSTALL_MODE" == "dualboot" ]]; then
-        echo -e "  ${GREEN}✓${NC}  ${WHITE}Windows Boot Manager${NC}   → boots Windows normally"
+        echo -e "  ${GREEN}+${NC}  ${WHITE}Windows Boot Manager${NC}   -> boots Windows normally"
     fi
     echo
-    echo -e "  ${PINK}── On first login ────────────────────────────────${NC}"
+    echo -e "  ${PINK}-- On first login --------------------------------${NC}"
     echo
-    echo -e "  ${CYAN}·${NC}  A terminal opens automatically and runs the first-boot setup."
-    echo -e "  ${CYAN}·${NC}  It installs: CachyOS kernel · removes stock linux · AUR packages · GE-Proton"
-    echo -e "  ${CYAN}·${NC}  Creates the ${WHITE}@clean${NC} Btrfs snapshot — bootable from Limine as a fallback."
-    echo -e "  ${CYAN}·${NC}  This takes 10–20 minutes. Let it complete, then reboot."
-    echo -e "  ${CYAN}·${NC}  Snapper auto-snapshots before/after every pacman update (snap-pac)."
-    echo -e "  ${CYAN}·${NC}  Refresh the clean state any time: ${WHITE}sudo niixarch-refresh-clean${NC}"
+    echo -e "  ${CYAN}-${NC}  A terminal opens automatically and runs the first-boot setup."
+    echo -e "  ${CYAN}-${NC}  It installs: CachyOS kernel - removes stock linux - AUR packages - GE-Proton"
+    echo -e "  ${CYAN}-${NC}  Creates the ${WHITE}@clean${NC} Btrfs snapshot - bootable from Limine as a fallback."
+    echo -e "  ${CYAN}-${NC}  This takes 10-20 minutes. Let it complete, then reboot."
+    echo -e "  ${CYAN}-${NC}  Snapper auto-snapshots before/after every pacman update (snap-pac)."
+    echo -e "  ${CYAN}-${NC}  Refresh the clean state any time: ${WHITE}sudo niixarch-refresh-clean${NC}"
     echo
     if [[ "$INSTALL_MODE" == "dualboot" ]]; then
         warn "If Limine doesn't appear: go into BIOS and move"
@@ -3338,8 +3866,8 @@ finish() {
     fi
     echo
 
-    # ── Anonymous install counter ────────────────────────────
-    # Fires only here, at confirmed success — not at launch — so it counts
+    # -- Anonymous install counter ----------------------------
+    # Fires only here, at confirmed success - not at launch - so it counts
     # completed installs, not attempts or abandoned runs. Run synchronously
     # with a short timeout (not backgrounded) so it can't be killed by the
     # script exiting or the machine rebooting before the request lands.
@@ -3350,10 +3878,10 @@ finish() {
     unset -f _hx 2>/dev/null || true; unset _u _q 2>/dev/null || true
 }
 
-# ── Auto-detect install mode ─────────────────────────────────
+# -- Auto-detect install mode ---------------------------------
 # Scans internal drives for Windows (NTFS partitions or EFI/Microsoft).
-# Windows found  → dual-boot (automatically, no menu)
-# Nothing found  → single-boot (automatically, no menu)
+# Windows found  -> dual-boot (automatically, no menu)
+# Nothing found  -> single-boot (automatically, no menu)
 auto_detect_mode() {
     hr "Install Mode Detection"
     info "Scanning internal drives for existing operating systems..."
@@ -3399,11 +3927,11 @@ auto_detect_mode() {
 
     echo
     if [[ "$windows_found" == true ]]; then
-        echo -e "  ${GREEN}✓${NC}  ${WHITE}${BOLD}Windows detected on an internal drive${NC}"
+        echo -e "  ${GREEN}+${NC}  ${WHITE}${BOLD}Windows detected on an internal drive${NC}"
         echo
         echo -e "  ${WHITE}${BOLD}How do you want to install?${NC}"
-        echo -e "  ${GREEN}[1]${NC}  ${WHITE}Dual-boot${NC}    — keep Windows, install Arch alongside it  ${DIM}(recommended)${NC}"
-        echo -e "  ${GREEN}[2]${NC}  ${WHITE}Single-boot${NC}  — ${RED}ERASE an entire drive${NC} (including Windows) and use it for Arch"
+        echo -e "  ${GREEN}[1]${NC}  ${WHITE}Dual-boot${NC}    - keep Windows, install Arch alongside it  ${DIM}(recommended)${NC}"
+        echo -e "  ${GREEN}[2]${NC}  ${WHITE}Single-boot${NC}  - ${RED}ERASE an entire drive${NC} (including Windows) and use it for Arch"
         echo
         echo -e "  ${DIM}Press Enter for the safe choice (dual-boot).${NC}"
         read -rp "  Choose [1/2]: " WIN_MODE_CHOICE
@@ -3418,26 +3946,26 @@ auto_detect_mode() {
             read -rp "  > " WIN_WIPE_CONFIRM
             if [[ "$WIN_WIPE_CONFIRM" == "ERASE WINDOWS" ]]; then
                 INSTALL_MODE="singleboot"
-                warn "Single-boot selected — you will pick the drive to erase next."
+                warn "Single-boot selected - you will pick the drive to erase next."
             else
                 INSTALL_MODE="dualboot"
-                log "Phrase did not match — keeping Windows (dual-boot)."
+                log "Phrase did not match - keeping Windows (dual-boot)."
             fi
         else
             INSTALL_MODE="dualboot"
-            echo -e "  ${GREEN}✓${NC}  ${WHITE}${BOLD}Dual-boot — Windows will be preserved${NC}"
+            echo -e "  ${GREEN}+${NC}  ${WHITE}${BOLD}Dual-boot - Windows will be preserved${NC}"
             echo -e "  ${DIM}  Arch installs into free space. No existing data is touched.${NC}"
         fi
     else
         INSTALL_MODE="singleboot"
-        echo -e "  ${CYAN}·${NC}  ${WHITE}${BOLD}No existing OS detected — installing in single-boot mode${NC}"
+        echo -e "  ${CYAN}-${NC}  ${WHITE}${BOLD}No existing OS detected - installing in single-boot mode${NC}"
         echo -e "  ${DIM}  A drive of your choice will be fully wiped and used for Arch.${NC}"
     fi
     echo
 }
 
-# ── Single-boot: select target drive ────────────────────────
-# ── Single-boot step 1: choose the target drive ─────────────
+# -- Single-boot: select target drive ------------------------
+# -- Single-boot step 1: choose the target drive -------------
 select_single_drive() {
     hr "Select Target Drive  (will be fully wiped)"
     warn "The ENTIRE selected drive will be repartitioned and ALL data destroyed."
@@ -3502,12 +4030,12 @@ select_single_drive() {
     log "Target drive confirmed: $SINGLE_DRIVE ($drive_size)"
 }
 
-# ── Single-boot step 2: wipe the drive ───────────────────────
+# -- Single-boot step 2: wipe the drive -----------------------
 # Completely destroys all existing data, partition tables, and
 # filesystem signatures. Run BEFORE partitioning.
 wipe_single_drive() {
     hr "Drive Wipe"
-    info "Wiping $SINGLE_DRIVE — destroying all existing data..."
+    info "Wiping $SINGLE_DRIVE - destroying all existing data..."
 
     # Close any open LUKS containers on this drive first
     lsblk -lno NAME,TYPE "$SINGLE_DRIVE" 2>/dev/null \
@@ -3525,49 +4053,50 @@ wipe_single_drive() {
         done
 
     # Wipe all filesystem and partition signatures
-    wipefs -a "$SINGLE_DRIVE"
+    wipefs -a "$SINGLE_DRIVE" || err "wipefs failed on $SINGLE_DRIVE"
     log "Filesystem signatures wiped"
 
     # Destroy the partition table (GPT + MBR backup)
-    sgdisk --zap-all "$SINGLE_DRIVE"
+    sgdisk --zap-all "$SINGLE_DRIVE" || err "sgdisk --zap-all failed on $SINGLE_DRIVE"
     log "Partition table destroyed"
 
     # Zero the first and last 10 MiB to eliminate any residual metadata
-    dd if=/dev/zero of="$SINGLE_DRIVE" bs=1M count=10 conv=fsync 2>/dev/null
+    dd if=/dev/zero of="$SINGLE_DRIVE" bs=1M count=10 conv=fsync 2>/dev/null \
+        || err "Failed to zero the start of $SINGLE_DRIVE"
     dd if=/dev/zero of="$SINGLE_DRIVE" bs=1M count=10 conv=fsync         seek=$(( $(blockdev --getsz "$SINGLE_DRIVE") / 2048 - 10 )) 2>/dev/null || true
 
     partprobe "$SINGLE_DRIVE" 2>/dev/null || true
     sleep 1
-    log "Drive $SINGLE_DRIVE wiped — ready for partitioning"
+    log "Drive $SINGLE_DRIVE wiped - ready for partitioning"
 }
 
-# ── Single-boot step 3: partition the drive ───────────────────
+# -- Single-boot step 3: partition the drive -------------------
 # Creates the same GPT layout dual-boot uses (EFI + LUKS),
 # then sets the identical variables so all downstream functions
 # (setup_luks, setup_btrfs, clean_efi, install_limine) run unchanged.
 create_singleboot_partitions() {
     hr "Partition Creation  (single-boot)"
-    info "Partitioning $SINGLE_DRIVE — same layout as dual-boot..."
+    info "Partitioning $SINGLE_DRIVE - same layout as dual-boot..."
 
-    # ── GPT + EFI + LUKS ─────────────────────────────────────
-    parted -s "$SINGLE_DRIVE" mklabel gpt
+    # -- GPT + EFI + LUKS -------------------------------------
+    parted -s "$SINGLE_DRIVE" mklabel gpt || err "Failed to create GPT label on $SINGLE_DRIVE"
     log "New GPT partition table created"
 
-    # Partition 1: EFI System Partition — 512 MiB
+    # Partition 1: EFI System Partition - 512 MiB
     # 1 MiB aligned start; large enough for kernel + initramfs + ucode + Limine
-    parted -s "$SINGLE_DRIVE" mkpart "EFI" fat32 1MiB 513MiB
-    parted -s "$SINGLE_DRIVE" set 1 esp on
-    log "EFI partition: 1 MiB → 513 MiB  (512 MiB, partition 1)"
+    parted -s "$SINGLE_DRIVE" mkpart "EFI" fat32 1MiB 513MiB || err "Failed to create EFI partition"
+    parted -s "$SINGLE_DRIVE" set 1 esp on                    || err "Failed to set esp flag on partition 1"
+    log "EFI partition: 1 MiB -> 513 MiB  (512 MiB, partition 1)"
 
-    # Partition 2: Linux LUKS container — remainder of drive
-    parted -s "$SINGLE_DRIVE" mkpart "arch" 513MiB 100%
-    log "Root partition: 513 MiB → 100%  (partition 2)"
+    # Partition 2: Linux LUKS container - remainder of drive
+    parted -s "$SINGLE_DRIVE" mkpart "arch" 513MiB 100% || err "Failed to create root partition"
+    log "Root partition: 513 MiB -> 100%  (partition 2)"
 
     # Inform the kernel and give udev time to create device nodes
     partprobe "$SINGLE_DRIVE"
     sleep 3
 
-    # Build partition paths — NVMe/MMC use 'p' suffix, SATA/USB do not
+    # Build partition paths - NVMe/MMC use 'p' suffix, SATA/USB do not
     if [[ "$SINGLE_DRIVE" == *nvme* || "$SINGLE_DRIVE" == *mmcblk* ]]; then
         EFI_PART="${SINGLE_DRIVE}p1"
         LUKS_PART="${SINGLE_DRIVE}p2"
@@ -3580,29 +4109,32 @@ create_singleboot_partitions() {
     [[ -b "$EFI_PART"  ]] || err "EFI partition $EFI_PART not found after partprobe"
     [[ -b "$LUKS_PART" ]] || err "Root partition $LUKS_PART not found after partprobe"
 
-    # Mirror the variables dual-boot sets — everything downstream is identical
+    # Mirror the variables dual-boot sets - everything downstream is identical
     EFI_DRIVE="$SINGLE_DRIVE"
     EFI_PART_NUM=1
     TARGET_DRIVE="$SINGLE_DRIVE"
 
     # Format EFI partition as FAT32 (same as Windows creates)
-    mkfs.fat -F32 -n "EFI" "$EFI_PART"
+    mkfs.fat -F32 -n "EFI" "$EFI_PART" || err "mkfs.fat failed on $EFI_PART"
     log "EFI partition formatted: $EFI_PART  (FAT32)"
     log "LUKS partition ready:    $LUKS_PART  (encryption next)"
 }
 
-# ════════════════════════════════════════════════════════════
+# ============================================================
 #  MAIN
-# ════════════════════════════════════════════════════════════
+# ============================================================
 dbg "Script started: $(date)"
 dbg "Script source: $0"
 dbg "Kernel: $(uname -r)"
+
+# Unwind mounts/encryption if the install is interrupted or killed midway.
+trap 'cleanup_on_fail' INT TERM
 
 banner
 check_prereqs
 auto_detect_mode
 
-# ── Hardware + drive detection (mode-dependent) ──────────────
+# -- Hardware + drive detection (mode-dependent) --------------
 if [[ "$INSTALL_MODE" == "dualboot" ]]; then
     detect_efi
 fi
@@ -3616,31 +4148,31 @@ else
     select_single_drive   # step 1: choose drive + confirm WIPE
 fi
 
-# ── User input + confirmation ────────────────────────────────
+# -- User input + confirmation --------------------------------
 gather_input
 confirm
 
-# ── Disk setup ───────────────────────────────────────────────
+# -- Disk setup -----------------------------------------------
 if [[ "$INSTALL_MODE" == "dualboot" ]]; then
     # Dual-boot: carve a partition out of existing free space
     create_partition
     dump_state "after create_partition"
 else
-    # Single-boot: wipe → partition → same layout as dual-boot
+    # Single-boot: wipe -> partition -> same layout as dual-boot
     wipe_single_drive                        # step 2: destroy everything
     dump_state "after wipe"
     create_singleboot_partitions             # step 3: GPT + EFI + LUKS
     dump_state "after singleboot_partitions"
 fi
 
-# ── From here both modes are identical ───────────────────────
+# -- From here both modes are identical -----------------------
 setup_luks
 dump_state "after setup_luks"
 setup_btrfs
 clean_efi       # purges stale NVRAM entries + old Arch/Limine files
 dump_state "after btrfs + clean_efi"
 
-# ── Install + configure (same for both modes) ────────────────
+# -- Install + configure (same for both modes) ----------------
 install_base
 enable_multilib
 install_gpu_drivers
@@ -3650,7 +4182,7 @@ configure_system
 # Dump boot-critical files to log
 {
     echo ""
-    echo "════ BOOT CONFIG DUMP ════"
+    echo "==== BOOT CONFIG DUMP ===="
     echo ""
     echo "--- /mnt/etc/mkinitcpio.conf ---"
     cat /mnt/etc/mkinitcpio.conf 2>&1 || true
@@ -3673,7 +4205,7 @@ configure_system
     echo "--- EFI partition space ---"
     df -h /mnt/boot 2>&1 || true
     echo ""
-    echo "════ END BOOT CONFIG DUMP ════"
+    echo "==== END BOOT CONFIG DUMP ===="
 } >> "$LOGFILE" 2>&1
 
 install_desktop
@@ -3684,7 +4216,7 @@ setup_firstboot
 # Dump final limine config to log
 {
     echo ""
-    echo "════ LIMINE CONFIG DUMP ════"
+    echo "==== LIMINE CONFIG DUMP ===="
     echo ""
     echo "--- /mnt/boot/limine/limine.cfg ---"
     cat /mnt/boot/limine/limine.cfg 2>&1 || true
@@ -3692,10 +4224,14 @@ setup_firstboot
     echo "--- efibootmgr ---"
     efibootmgr -v 2>&1 || true
     echo ""
-    echo "════ END LIMINE CONFIG DUMP ════"
+    echo "==== END LIMINE CONFIG DUMP ===="
 } >> "$LOGFILE" 2>&1
 
 dump_state "final state"
+
+# Install finished - stop unwinding on Ctrl+C so the user can stay in a shell
+# with /mnt mounted for inspection if they cancel the reboot prompt.
+trap - INT TERM
 
 # Copy log to the installed system so it survives reboot
 cp "$LOGFILE" /mnt/var/log/niixarch-install.log 2>/dev/null || true
@@ -3725,25 +4261,25 @@ finish
 #                  //   | A |     | T |   \\
 #                 //    |   |     |   |    \\
 #                //     |___|     |___|     \\
-#               //       | |       | |      \\
-#              //   ___  | |  ___  | |  ___  \\
-#             //   |   | | | |   | | | |   |  \\
-#            //    | A | | | |   | | | | T |   \\
-#           //     |   | | | |   | | | |   |    \\
-#          //      |___| | | |___| | | |___|     \\
-#         //        | |  | |  | |  | |  | |       \\
-#        //    ___  | |  | |  | |  | |  | |  ___   \\
-#       //    |   | | |  | |  | |  | |  | | |   |   \\
-#      //     | A | | |  | |  | |  | |  | | | N |    \\
-#     //      |   | | |  | |  | |  | |  | | |   |     \\
-#    //       |___| | |  | |  | |  | |  | | |___|      \\
-#   //____________________________________________________\\
-#   |                                                      |
+#               //       | |       | |       \\
+#              //   ___  | |  ___  | |  ___   \\
+#             //   |   | | | |   | | | |   |   \\
+#            //    | A | | | |   | | | | T |    \\
+#           //     |   | | | |   | | | |   |     \\
+#          //      |___| | | |___| | | |___|      \\
+#         //        | |  | |  | |  | |  | |        \\
+#        //    ___  | |  | |  | |  | |  | |  ___    \\
+#       //    |   | | |  | |  | |  | |  | | |   |    \\
+#      //     | A | | |  | |  | |  | |  | | | N |     \\
+#     //      |   | | |  | |  | |  | |  | | |   |      \\
+#    //       |___| | |  | |  | |  | |  | | |___|       \\
+#   //___________________________________________________\\
+#   |                                                     |
 #   |          T E M P L E   O F   T H E   R A M          |
-#   |                                                      |
-#   |______________________________________________________|
-#   |||  |||  |||  |||  |||  |||  |||  |||  |||  |||  |||
-#   |||  |||  |||  |||  |||  |||  |||  |||  |||  |||  |||
+#   |                                                     |
+#   |_____________________________________________________|
+#   |||  |||  |||  |||  |||  |||   |||  |||  |||  |||  |||
+#   |||  |||  |||  |||  |||  |||   |||  |||  |||  |||  |||
 #
 #   A = Alan Turing      T = Terry Davis
 #   A = Aaron Swartz     N = Nicholas Winton
@@ -3852,118 +4388,6 @@ finish
 
 
 
-# ── Copy logs to USB drive ──────────────────────────────────
-copy_logs_to_usb() {
-    hr "Save Logs to USB"
-    info "Looking for a USB drive to copy logs to..."
-
-    # Find which drive is running the live ISO — exclude it
-    ISO_DEV=""
-    # Try multiple archiso mount points
-    for mnt in /run/archiso/bootmnt /run/archiso/airootfs; do
-        src=$(findmnt -n -o SOURCE "$mnt" 2>/dev/null | head -1)
-        if [[ -n "$src" ]]; then
-            parent=$(lsblk -no PKNAME "$src" 2>/dev/null | head -1)
-            # Handle nested parents (e.g. ventoy → sda1 → sda)
-            while [[ -n "$parent" ]]; do
-                grandparent=$(lsblk -no PKNAME "/dev/$parent" 2>/dev/null | head -1)
-                [[ -n "$grandparent" ]] && parent="$grandparent" || break
-            done
-            [[ -n "$parent" ]] && ISO_DEV="/dev/$parent" && break
-        fi
-    done
-    dbg "ISO drive: ${ISO_DEV:-unknown}"
-
-    # Find USB/removable drives that are NOT the ISO drive
-    USB_PARTS=()
-
-    # First, find all USB or removable DISKS
-    USB_DISKS=()
-    while IFS= read -r line; do
-        dpath=$(echo "$line" | awk '{print $1}')
-        drm=$(echo "$line" | awk '{print $3}')
-        dtran=$(echo "$line" | awk '{print $4}')
-        # Include if removable OR USB transport
-        if [[ "$drm" == "1" || "$dtran" == "usb" ]]; then
-            [[ "$dpath" == "$ISO_DEV" ]] && continue
-            USB_DISKS+=("$dpath")
-        fi
-    done < <(lsblk -dn -o PATH,TYPE,RM,TRAN 2>/dev/null | awk '$2 == "disk"')
-
-    dbg "USB disks (excluding ISO): ${USB_DISKS[*]+"${USB_DISKS[*]}"}"
-
-    # Now find mountable partitions on those USB disks
-    if [[ ${#USB_DISKS[@]} -gt 0 ]]; then
-        for udisk in "${USB_DISKS[@]}"; do
-        while IFS= read -r pdev; do
-            [[ -b "$pdev" ]] || continue
-            fstype=$(lsblk -no FSTYPE "$pdev" 2>/dev/null | head -1)
-            [[ -z "$fstype" ]] && continue
-
-            size=$(lsblk -no SIZE "$pdev" 2>/dev/null | head -1)
-            label=$(lsblk -no LABEL "$pdev" 2>/dev/null | head -1)
-            label=${label:-no label}
-
-            USB_PARTS+=("${pdev}|${size}|${fstype}|${label}")
-        done < <(lsblk -ln -o PATH,TYPE "$udisk" 2>/dev/null | awk '$2 == "part" {print $1}')
-        done
-    fi
-
-    if [[ ${#USB_PARTS[@]} -eq 0 ]]; then
-        warn "No other USB drive found. Logs saved to:"
-        echo -e "    ${YELLOW}${LOGFILE}${NC}  (live ISO — lost on reboot)"
-        echo -e "    ${YELLOW}/var/log/niixarch-install.log${NC}  (installed system)"
-        return
-    fi
-
-    # Pick the USB partition
-    local USB_TARGET=""
-    if [[ ${#USB_PARTS[@]} -eq 1 ]]; then
-        USB_TARGET="${USB_PARTS[0]}"
-        IFS='|' read -r udev usize ufs ulabel <<< "$USB_TARGET"
-        log "Found USB: $udev ($usize, $ufs, $ulabel)"
-    else
-        echo
-        echo -e "${BOLD}  Multiple USB partitions found:${NC}"
-        echo
-        for i in "${!USB_PARTS[@]}"; do
-            IFS='|' read -r udev usize ufs ulabel <<< "${USB_PARTS[$i]}"
-            printf "  ${CYAN}[%s]${NC}  %-16s  %6s  %s  (%s)\n" \
-                "$i" "$udev" "$usize" "$ulabel" "$ufs"
-        done
-        echo
-        ask "Copy logs to which USB? Enter the number (or 's' to skip):"
-        read -rp "  > " USB_CHOICE
-        [[ "$USB_CHOICE" == "s" ]] && { info "Skipped."; return; }
-        [[ "$USB_CHOICE" =~ ^[0-9]+$ ]] || { warn "Invalid choice. Skipped."; return; }
-        USB_TARGET="${USB_PARTS[$USB_CHOICE]:-}"
-        [[ -n "$USB_TARGET" ]] || { warn "Invalid choice. Skipped."; return; }
-    fi
-
-    IFS='|' read -r USB_DEV USB_SIZE USB_FS USB_LABEL <<< "$USB_TARGET"
-
-    # Mount the USB
-    local USB_MNT="/mnt/usb_log"
-    mkdir -p "$USB_MNT"
-
-    if mount "$USB_DEV" "$USB_MNT" 2>/dev/null; then
-        log "Mounted $USB_DEV at $USB_MNT"
-
-        # Copy both log files
-        cp "$LOGFILE" "$USB_MNT/" 2>/dev/null \
-            && log "Copied $(basename "$LOGFILE") to USB"
-        cp /mnt/var/log/niixarch-install.log "$USB_MNT/" 2>/dev/null \
-            && log "Copied niixarch-install.log to USB"
-
-        sync
-        umount "$USB_MNT" 2>/dev/null
-        rmdir "$USB_MNT" 2>/dev/null || true
-
-        log "Logs saved to USB ($USB_LABEL)"
-    else
-        warn "Could not mount $USB_DEV — logs not copied to USB"
-    fi
-}
 
 copy_logs_to_usb
 
@@ -3974,8 +4398,8 @@ echo -e "    Live ISO:    ${YELLOW}${LOGFILE}${NC}"
 echo -e "    Installed:   ${YELLOW}/var/log/niixarch-install.log${NC}"
 echo
 
-# ── Reboot on Enter ───────────────────────────────────────
-echo -e "  ${PINK}────────────────────────────────────────────────────────${NC}"
+# -- Reboot on Enter ---------------------------------------
+echo -e "  ${PINK}--------------------------------------------------------${NC}"
 read -rp "$(echo -e "  ${GREEN}Press Enter to reboot${NC} ${DIM}(or Ctrl+C to stay at the shell)${NC}  ")" _
 echo -e "  ${CYAN}Unmounting and rebooting...${NC}"
 umount -R /mnt 2>/dev/null || true
