@@ -71,7 +71,7 @@ LOCALE="en_GB.UTF-8"
 MIRROR_COUNTRY="Switzerland"
 MAPPER="cryptroot"
 BTRFS_OPTS="noatime,compress=zstd,space_cache=v2"
-NIIX_BUILD="2026-09-19-r19"  # bump on every change - printed on the banner to verify freshness
+NIIX_BUILD="2026-09-19-r21"  # bump on every change - printed on the banner to verify freshness
 
 # -- Install mode ---------------------------------------------
 INSTALL_MODE=""    # "dualboot" | "singleboot"
@@ -1533,6 +1533,22 @@ chroot_install() {
     return 0
 }
 
+# Best-effort extras that are subject to multilib churn (Arch has been dropping
+# and re-adding lib32 packages; some now live only in the AUR). Try each on its
+# own so a name that isn't currently in the repos is quietly skipped instead of
+# collapsing the whole main transaction into the slow per-package fallback.
+# These are nice-to-have 32-bit codecs, never required for a working system.
+install_optional() {
+    local p
+    for p in "$@"; do
+        if arch-chroot /mnt pacman -S --noconfirm --needed "$p" &>/dev/null; then
+            info "optional 32-bit codec installed: $p"
+        else
+            info "optional 32-bit codec not in repos right now - skipped: $p"
+        fi
+    done
+}
+
 install_packages() {
     hr "Package Install"
     info "Installing packages (gaming, security, tools)..."
@@ -1544,8 +1560,7 @@ install_packages() {
         wine winetricks \
         vkd3d lib32-vkd3d \
         ananicy-cpp \
-        lib32-alsa-plugins lib32-libpulse lib32-openal \
-        lib32-gst-plugins-base lib32-gst-plugins-good \
+        lib32-alsa-plugins lib32-libpulse \
         ufw \
         zram-generator irqbalance \
         power-profiles-daemon \
@@ -1559,6 +1574,10 @@ install_packages() {
         libva-utils dmidecode \
         gnome-shell-extension-appindicator \
         reflector
+
+    # Optional 32-bit codecs, best-effort (see install_optional). Kept out of the
+    # batch above so their availability can't affect the core install.
+    install_optional lib32-openal lib32-gst-plugins-base lib32-gst-plugins-good
 
     # Steam - requires multilib. Non-fatal: a transient mirror/DNS blip on one
     # app must not abort a whole install. If it fails now, first-boot retries it.
@@ -1588,10 +1607,17 @@ install_packages() {
         defer_pkg fastfetch
     fi
 
-    # CPU microcode
+    # CPU microcode. A stale <vendor>-ucode.img left on a reused ESP makes a
+    # plain install fail with "exists in filesystem" (a file conflict retries
+    # can't fix), silently skipping microcode. --overwrite lets the package
+    # claim the file it legitimately owns; retry fallback covers mirror blips.
     case "$CPU_VENDOR" in
-        amd)   pac_install_retry amd-ucode ;;
-        intel) pac_install_retry intel-ucode ;;
+        amd)
+            arch-chroot /mnt pacman -S --noconfirm --needed --overwrite '/boot/amd-ucode.img' amd-ucode \
+                || pac_install_retry amd-ucode || warn "amd-ucode not installed - CPU microcode updates unavailable" ;;
+        intel)
+            arch-chroot /mnt pacman -S --noconfirm --needed --overwrite '/boot/intel-ucode.img' intel-ucode \
+                || pac_install_retry intel-ucode || warn "intel-ucode not installed - CPU microcode updates unavailable" ;;
     esac
 
     # CoreCtrl for AMD GPU control
@@ -2464,15 +2490,24 @@ install_desktop() {
     # gaming install. Strip them right after the group install rather than
     # trying to exclude them from the group (pacman groups install as a
     # whole). Papers is kept as the PDF viewer, Evince is redundant with it.
+    # Remove PER PACKAGE, not as one atomic transaction: a few of these (evince,
+    # yelp, gnome-color-manager) are still required by packages we keep (sushi,
+    # gnome-user-docs, gnome-control-center), and an atomic -Rns aborts the WHOLE
+    # removal on the first such conflict - leaving all the bloat installed. Per
+    # package, the removable ones go and the still-needed ones are simply kept
+    # (their menu entries are hidden at first boot anyway).
     log "Removing unwanted GNOME group apps (keeping Papers as the PDF viewer)..."
-    if arch-chroot /mnt pacman -Rns --noconfirm \
-        gnome-tour epiphany gnome-maps gnome-contacts gnome-characters \
-        gnome-connections gnome-font-viewer simple-scan yelp gnome-user-share \
-        gnome-color-manager evince; then
-        log "Unwanted GNOME apps removed"
-    else
-        warn "Could not remove some/all unwanted GNOME apps - they may still show in the menu. Check the log above for the pacman error (often a dependency conflict)."
-    fi
+    gnome_removed=0; gnome_kept=0
+    for gp in gnome-tour epiphany gnome-maps gnome-contacts gnome-characters \
+              gnome-connections gnome-font-viewer simple-scan yelp gnome-user-share \
+              gnome-color-manager evince; do
+        if arch-chroot /mnt pacman -Rns --noconfirm "$gp" &>/dev/null; then
+            gnome_removed=$((gnome_removed + 1))
+        else
+            gnome_kept=$((gnome_kept + 1))
+        fi
+    done
+    log "GNOME cleanup: ${gnome_removed} removed, ${gnome_kept} kept (still required by other apps; menu entries hidden at first boot)"
 
     arch-chroot /mnt bash <<CHROOT
 set -e
@@ -3632,6 +3667,40 @@ if ! pacman -Q linux-cachyos &>/dev/null; then
     if command -v cachyos-rate-mirrors >/dev/null 2>&1; then
         sudo cachyos-rate-mirrors || warn "Mirror ranking failed - continuing with current mirrors."
     fi
+
+    # Drop the flaky cdn77 mirror and prefer archlinux.cachyos.org. rate-mirrors
+    # ranks by raw speed, so cdn77 (quick to connect but 404s on individual
+    # x86_64_v4 packages) can still land at the top and stall every pacman run
+    # with retries. Comment it out of every CachyOS mirrorlist, float the
+    # reliable primary to the front, and NEVER leave a list with zero servers.
+    info "Preferring reliable CachyOS mirrors (dropping flaky cdn77)..."
+    for ml in /etc/pacman.d/cachyos-mirrorlist \
+              /etc/pacman.d/cachyos-v3-mirrorlist \
+              /etc/pacman.d/cachyos-v4-mirrorlist \
+              /etc/pacman.d/cachyos-znver4-mirrorlist; do
+        [ -f "$ml" ] || continue
+        tmp="/tmp/niix-cml.$$"
+        if awk '
+            {
+              if ($0 ~ /^[[:space:]]*Server[[:space:]]*=[[:space:]]*https?:\/\/cdn77\.cachyos\.org/)     { cdn[++c]=$0; next }
+              if ($0 ~ /^[[:space:]]*Server[[:space:]]*=[[:space:]]*https?:\/\/archlinux\.cachyos\.org/) { prim[++p]=$0; next }
+              if ($0 ~ /^[[:space:]]*Server[[:space:]]*=/)                                               { oth[++o]=$0; next }
+              head[++h]=$0
+            }
+            END {
+              for (i=1;i<=h;i++) print head[i]
+              if (p + o > 0) {
+                for (i=1;i<=p;i++) print prim[i]
+                for (i=1;i<=o;i++) print oth[i]
+                for (i=1;i<=c;i++) print "#" cdn[i] "  # disabled by niixaOS (flaky cdn77)"
+              } else {
+                for (i=1;i<=c;i++) print cdn[i]
+              }
+            }' "$ml" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+            sudo cp "$tmp" "$ml" && log "Preferred reliable mirrors in $(basename "$ml")"
+        fi
+        rm -f "$tmp"
+    done
     info "Completing CachyOS system upgrade..."
     pac_retry -Syu --noconfirm \
         || warn "System upgrade incomplete - run 'sudo cachyos-rate-mirrors && sudo pacman -Syu' once mirrors sync."
@@ -4050,12 +4119,31 @@ install_ge_proton() {
     mkdir -p "$compat_dir"
     [ -d "$compat_dir/$tag" ] && { log "GE-Proton $tag already installed - skipping"; return 0; }
 
-    # Read the actual download URLs straight from the API response.
-    local tar_url sum_url
-    tar_url=$(printf '%s\n' "$json" | grep -oE '"browser_download_url": *"[^"]*"' | cut -d'"' -f4 | grep -E '\.tar\.gz$'   | head -n1)
-    sum_url=$(printf '%s\n' "$json" | grep -oE '"browser_download_url": *"[^"]*"' | cut -d'"' -f4 | grep -E '\.sha512sum$' | head -n1)
+    # Read the actual download URLs straight from the API response, picking the
+    # asset for THIS machine's architecture. Recent GE-Proton releases ship both
+    # -x86_64.tar.gz and -aarch64.tar.gz, so a blind "first .tar.gz" grabs the
+    # ARM build on an x86_64 box (which is what happened). Match upstream's own
+    # download script: pick by uname -m, and match the checksum to that tarball.
+    local tar_url sum_url arch pat urls tar_base rel_name
+    arch=$(uname -m)
+    case "$arch" in
+        x86_64)        pat='x86_64\.tar\.gz$' ;;
+        aarch64|arm64) pat='aarch64\.tar\.gz$' ;;
+        *) warn "GE-Proton: unsupported architecture '$arch' - skipped"; return 1 ;;
+    esac
+    urls=$(printf '%s\n' "$json" | grep -oE '"browser_download_url": *"[^"]*"' | cut -d'"' -f4)
+    tar_url=$(printf '%s\n' "$urls" | grep -E "$pat" | head -n1)
+    # Fallback for older releases that shipped x86_64 with no arch suffix.
+    if [ -z "$tar_url" ] && [ "$arch" = "x86_64" ]; then
+        tar_url=$(printf '%s\n' "$urls" | grep -E '\.tar\.gz$' | grep -viE 'aarch64|arm64' | head -n1)
+    fi
+    tar_base=$(basename "$tar_url")
+    rel_name=${tar_base%.tar.gz}
+    # Checksum that matches the chosen tarball; fall back to a non-ARM .sha512sum.
+    sum_url=$(printf '%s\n' "$urls" | grep -E "/${rel_name}\.sha512sum$" | head -n1)
+    [ -z "$sum_url" ] && sum_url=$(printf '%s\n' "$urls" | grep -E '\.sha512sum$' | grep -viE 'aarch64|arm64' | head -n1)
     if [ -z "$tar_url" ] || [ -z "$sum_url" ]; then
-        warn "GE-Proton: release assets not found in API response - skipped (use ProtonUp-Qt later)"
+        warn "GE-Proton: no ${arch} release asset found in API response - skipped (use ProtonUp-Qt later)"
         return 1
     fi
 
