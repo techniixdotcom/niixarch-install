@@ -67,11 +67,13 @@ NIIX_ICONS_B64="H4sIAAAAAAAAA+xdXXPjOHbt5/kVLOdltypg4xtianqrkmzylNlK1exm8pZiU2yT
 # -- Hardcoded preferences ------------------------------------
 KEYMAP="us"        # console keymap  (loadkeys / vconsole.conf) - set by gather_input
 KEYMAP_X11="us"    # X11/Wayland layout (localectl / XkbLayout) - set by gather_input
+KEYMAP_X11_VARIANT=""          # XkbVariant (e.g. dvorak) - set by gather_input
+KEYBOARD_NAME="English (US)"   # human-readable, for the summary screen
 LOCALE="en_GB.UTF-8"
 MIRROR_COUNTRY="Switzerland"
 MAPPER="cryptroot"
 BTRFS_OPTS="noatime,compress=zstd,space_cache=v2"
-NIIX_BUILD="2026-09-30-r25"  # bump on every change - printed on the banner to verify freshness
+NIIX_BUILD="2026-09-30-r27"  # bump on every change - printed on the banner to verify freshness
 
 # -- Install mode ---------------------------------------------
 INSTALL_MODE=""    # "dualboot" | "singleboot"
@@ -318,7 +320,7 @@ copy_logs_to_usb() {
         [[ -n "$USB_TARGET" ]] || { warn "Invalid choice. Skipped."; return; }
     fi
 
-    IFS='|' read -r USB_DEV USB_SIZE USB_FS USB_LABEL <<< "$USB_TARGET"
+    IFS='|' read -r USB_DEV _ _ USB_LABEL <<< "$USB_TARGET"
 
     # Mount the USB
     local USB_MNT="/mnt_usb_log"
@@ -756,7 +758,7 @@ PYEOF
         while IFS= read -r line; do
             idx="${line%%:*}"
             rest="${line#*:}"
-            IFS='|' read -r drive start end size_gib model <<< "$rest"
+            IFS='|' read -r drive start _ size_gib model <<< "$rest"
             printf "  ${CYAN}[%s]${NC}  %-16s  %6.1f GiB  (%s)\n" \
                 "$idx" "$drive" "$size_gib" "$model"
         done <<< "$FREE_SPACE_LIST"
@@ -1005,31 +1007,260 @@ PYEOF
 }
 
 # -- Step 3: Gather user input --------------------------------
+# Prints pre-formatted entries in columns, filled top-to-bottom so an
+# alphabetical list reads naturally down each column.
+_columns() {
+    local width=$1; shift
+    printf '%s\n' "$@" | awk -v W="$width" '
+        { item[NR] = $0; if (length($0) > m) m = length($0) }
+        END {
+            if (NR == 0) exit
+            cw = m + 3; cols = int((W - 2) / cw); if (cols < 1) cols = 1
+            rows = int((NR + cols - 1) / cols)
+            for (r = 1; r <= rows; r++) {
+                line = "  "
+                for (c = 0; c < cols; c++) {
+                    i = r + c * rows
+                    if (i <= NR) line = line sprintf("%-" cw "s", item[i])
+                }
+                sub(/ +$/, "", line); print line
+            }
+        }'
+}
+
+# _pick TITLE ENTER_LABEL ITEM...
+# Numbered picker that always fits the screen: long lists are paged (n/p),
+# and typing 2+ letters searches. Numbers never change while paging or
+# searching, so what you type is what you saw.
+# Result in PICK: 1..N = that item, 0 = Enter, -1 = typed text containing "/"
+# (left in PICK_TEXT for callers that accept a full name).
+_pick() {
+    local title=$1 enter_label=$2; shift 2
+    local -a items=("$@") view=()
+    local n=$# width height d i maxlen cols rows per pages page=0 filter="" input
+    width=$(tput cols 2>/dev/null) || width=0
+    [[ "$width" =~ ^[0-9]+$ ]] && (( width >= 40 )) || width=80
+    height=$(tput lines 2>/dev/null) || height=0
+    [[ "$height" =~ ^[0-9]+$ ]] && (( height >= 12 )) || height=24
+    d=${#n}
+    PICK=0; PICK_TEXT=""
+    while true; do
+        view=(); maxlen=0
+        for (( i = 1; i <= n; i++ )); do
+            if [[ -z "$filter" || "${items[i-1],,}" == *"${filter,,}"* ]]; then
+                view+=("$(printf "[%${d}d] %s" "$i" "${items[i-1]}")")
+                (( ${#view[-1]} > maxlen )) && maxlen=${#view[-1]}
+            fi
+        done
+        cols=$(( (width - 2) / (maxlen + 3) )); (( cols >= 1 )) || cols=1
+        rows=$(( height - 8 )); (( rows >= 4 )) || rows=4
+        per=$(( cols * rows ))
+        pages=$(( (${#view[@]} + per - 1) / per ))
+        (( page >= pages )) && page=$(( pages - 1 ))
+        (( page < 0 )) && page=0
+
+        echo
+        echo -e "  ${WHITE}${BOLD}${title}${NC}${filter:+  (search: $filter)}$( (( pages > 1 )) && echo "  - page $(( page + 1 ))/$pages")"
+        echo
+        _columns "$width" "${view[@]:page*per:per}"
+        echo
+        local hint="number"
+        (( pages > 1 )) && hint+=", n/p = next/previous page"
+        hint+=", letters = search"
+        [[ -n "$filter" ]] && hint+=", Enter = clear search" || hint+=", Enter = $enter_label"
+        read -rp "  Choose ($hint): " input
+        input=${input#"${input%%[![:space:]]*}"}; input=${input%"${input##*[![:space:]]}"}
+
+        if [[ -z "$input" ]]; then
+            if [[ -n "$filter" ]]; then filter=""; page=0; continue; fi
+            PICK=0; return
+        elif [[ "$input" =~ ^[0-9]+$ ]]; then
+            if (( input >= 1 && input <= n )); then PICK=$input; return; fi
+            warn "Please type a number from 1 to $n."
+        elif [[ "$input" == n || "$input" == N ]]; then
+            (( page + 1 < pages )) && page=$(( page + 1 ))
+        elif [[ "$input" == p || "$input" == P ]]; then
+            (( page > 0 )) && page=$(( page - 1 ))
+        elif [[ "$input" == */* ]]; then
+            PICK=-1; PICK_TEXT=$input; return
+        elif (( ${#input} < 2 )); then
+            warn "Type at least 2 letters to search."
+        else
+            local hit=0
+            for (( i = 0; i < n; i++ )); do
+                [[ "${items[i],,}" == *"${input,,}"* ]] && { hit=1; break; }
+            done
+            if (( hit )); then filter=$input; page=0; else warn "Nothing matches '$input'."; fi
+        fi
+    done
+}
+
+# Keyboard: console keymap (TTY + the disk-unlock prompt at boot) and desktop
+# layout are chosen together, because the LUKS passphrase is typed on the
+# console keymap both now and at every boot - they must never differ.
+# Console names are Arch kbd names; several candidates are tried in order and
+# checked against what this ISO really ships, with a safe US fallback.
+choose_keyboard() {
+    local -a KB_NAME=() KB_CONS=() KB_XKB=() KB_VAR=()
+    local name cons xkb var def=0 choice idx km cand available
+    while IFS='|' read -r name cons xkb var; do
+        [[ -n "$name" ]] || continue
+        KB_NAME+=("$name"); KB_CONS+=("$cons"); KB_XKB+=("$xkb"); KB_VAR+=("$var")
+        [[ "$name" == "English (US)" ]] && def=${#KB_NAME[@]}
+    done <<'KBEOF'
+Belgian|be-latin1|be|
+Brazilian (ABNT2)|br-abnt2|br|
+Bulgarian (+ English)|us|us,bg|
+Canadian French|cf|ca|
+Canadian Multilingual|cf|ca|multix
+Croatian|croat|hr|
+Czech|cz-qwertz cz|cz|
+Danish|dk-latin1|dk|
+Dutch|nl|nl|
+English (UK)|uk|gb|
+English (US)|us|us|
+English (US, Colemak)|colemak|us|colemak
+English (US, Dvorak)|dvorak|us|dvorak
+English (US, International)|us-acentos|us|intl
+Estonian|et|ee|
+Finnish|fi|fi|
+French|fr-latin1|fr|
+French (Bepo)|fr-bepo-latin9|fr|bepo
+French (Swiss)|fr_CH-latin1|ch|fr
+German|de-latin1|de|
+German (Austria)|de-latin1|at|
+German (Neo 2)|neo|de|neo
+German (Swiss)|de_CH-latin1|ch|
+Greek (+ English)|us|us,gr|
+Hungarian|hu|hu|
+Icelandic|is-latin1|is|
+Irish|uk|ie|
+Italian|it|it|
+Japanese (106)|jp106|jp|
+Latin American|la-latin1|latam|
+Latvian|lv|lv|
+Lithuanian|lt|lt|
+Norwegian|no-latin1|no|
+Polish|pl2|pl|
+Portuguese|pt-latin1|pt|
+Romanian|ro|ro|
+Russian (+ English)|us|us,ru|
+Serbian (Latin)|sr-latin|rs|latin
+Slovak|sk-qwertz|sk|
+Slovenian|slovene|si|
+Spanish|es|es|
+Swedish|sv-latin1|se|
+Turkish (F)|trf|tr|f
+Turkish (Q)|trq|tr|
+Ukrainian (+ English)|us|us,ua|
+KBEOF
+
+    echo -e "  ${DIM}Layouts marked (+ English) keep US English for the console and the disk${NC}"
+    echo -e "  ${DIM}unlock prompt; on the desktop switch between both with Super+Space.${NC}"
+    while true; do
+        _pick "Keyboard Layout" "English (US)" "${KB_NAME[@]}"
+        (( PICK == 0 )) && choice=$def && break
+        (( PICK > 0 )) && choice=$PICK && break
+        warn "Please choose a number from the list."
+    done
+    idx=$(( choice - 1 ))
+
+    available=$(localectl list-keymaps --no-pager 2>/dev/null)
+    km=""
+    for cand in ${KB_CONS[$idx]}; do
+        if [[ -z "$available" ]] || grep -qxF "$cand" <<<"$available"; then
+            km=$cand
+            break
+        fi
+    done
+    # loadkeys is the final word: it is exactly what the boot prompt will use.
+    if [[ -z "$km" ]] || ! loadkeys "$km" >/dev/null 2>&1; then
+        warn "The console keymap for '${KB_NAME[$idx]}' is not available on this ISO."
+        warn "The console and disk-unlock prompt will use US English; the desktop still gets ${KB_NAME[$idx]}."
+        km=us
+        loadkeys us >/dev/null 2>&1 || true
+    fi
+
+    KEYBOARD_NAME=${KB_NAME[$idx]}
+    KEYMAP=$km
+    KEYMAP_X11=${KB_XKB[$idx]}
+    KEYMAP_X11_VARIANT=${KB_VAR[$idx]}
+    log "Keyboard: $KEYBOARD_NAME (console: $KEYMAP, desktop: $KEYMAP_X11${KEYMAP_X11_VARIANT:+ / $KEYMAP_X11_VARIANT})"
+}
+
+# Timezone: pick a region, then a city - both numbered and alphabetical. A
+# full name like Europe/Paris can be typed at either prompt. The list comes
+# from the ISO itself, so it is always complete and valid.
+choose_timezone() {
+    local -a all=() regions=() zones=() labels=()
+    local default="Europe/Zurich" region z
+    mapfile -t all < <(timedatectl list-timezones --no-pager 2>/dev/null)
+    if (( ${#all[@]} == 0 )) && [[ -r /usr/share/zoneinfo/tzdata.zi ]]; then
+        mapfile -t all < <(awk '$1 == "Z" || $1 == "L" { print ($1 == "Z" ? $2 : $3) }' \
+            /usr/share/zoneinfo/tzdata.zi | sort -u)
+    fi
+    if (( ${#all[@]} == 0 )); then
+        # Last resort: typed entry, validated against the zoneinfo files.
+        while true; do
+            ask "Timezone (press Enter for $default):"
+            read -rp "  > " TIMEZONE
+            TIMEZONE=${TIMEZONE:-$default}
+            [[ "$TIMEZONE" != *..* && -f "/usr/share/zoneinfo/$TIMEZONE" ]] && break
+            warn "Unknown timezone '$TIMEZONE' - try again (e.g. Europe/Zurich)."
+        done
+        log "Timezone: $TIMEZONE"
+        return
+    fi
+
+    # Only the ten real regions; legacy alias folders (US/, Canada/, Brazil/ ...)
+    # just duplicate America/*, and can still be typed as a full name.
+    mapfile -t regions < <(printf '%s\n' "${all[@]}" | awk -F/ '
+        NF > 1 && $1 ~ /^(Africa|America|Antarctica|Arctic|Asia|Atlantic|Australia|Europe|Indian|Pacific)$/ { print $1 }' | sort -u)
+    regions+=("UTC")
+
+    while true; do
+        TIMEZONE=""
+        _pick "Timezone - region" "$default" "${regions[@]}"
+        if (( PICK == 0 )); then
+            TIMEZONE=$default
+        elif (( PICK == -1 )); then
+            if printf '%s\n' "${all[@]}" | grep -qxF -- "$PICK_TEXT"; then
+                TIMEZONE=$PICK_TEXT
+            else
+                warn "Unknown timezone '$PICK_TEXT'."; continue
+            fi
+        else
+            region=${regions[PICK-1]}
+            if [[ "$region" == "UTC" ]]; then
+                TIMEZONE=UTC
+            else
+                mapfile -t zones < <(printf '%s\n' "${all[@]}" | grep "^${region}/" | sort)
+                labels=()
+                for z in "${zones[@]}"; do
+                    z=${z#"$region"/}
+                    labels+=("${z//_/ }")
+                done
+                _pick "Timezone - $region" "back to regions" "${labels[@]}"
+                (( PICK > 0 )) || continue
+                TIMEZONE=${zones[PICK-1]}
+            fi
+        fi
+        # It must exist as a zone file: /etc/localtime is symlinked to it.
+        [[ -f "/usr/share/zoneinfo/$TIMEZONE" ]] && break
+        warn "'$TIMEZONE' has no zone file on this ISO - please pick another."
+    done
+    log "Timezone: $TIMEZONE"
+}
+
 gather_input() {
     hr "Installation Config"
     echo -e "  ${WHITE}${BOLD}Configure your NiiX Arch install:${NC}"
     echo
 
     # -- Keyboard layout --------------------------------------
-    echo -e "  ${WHITE}${BOLD}Keyboard Layout${NC}"
-    echo -e "  ${GREEN}[1]${NC}  ${WHITE}US${NC}              - English (US)"
-    echo -e "  ${GREEN}[2]${NC}  ${WHITE}Swiss German${NC}    - de_CH  (ue oe ae)"
-    read -rp "  Choose [1/2]: " KB_CHOICE
-    case "$KB_CHOICE" in
-        2)
-            KEYMAP="de_CH-latin1"
-            KEYMAP_X11="ch"
-            log "Keyboard: Swiss German (de_CH-latin1 / ch)"
-            ;;
-        *)
-            KEYMAP="us"
-            KEYMAP_X11="us"
-            log "Keyboard: US"
-            ;;
-    esac
-
-    # Apply to the live ISO immediately so passwords can be typed correctly
-    loadkeys "$KEYMAP"
+    # Chosen first and applied to the live ISO immediately, so the passwords
+    # below are typed on the same layout the boot-time unlock prompt uses.
+    choose_keyboard
 
     while true; do
         ask "Hostname (e.g. archbox, press Enter for 'niixarch'):"
@@ -1049,6 +1280,22 @@ gather_input() {
             continue
         fi
         if [[ "$USERNAME" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+            # Names taken by the base system or created later by packages
+            # (gdm, polkitd, ...). Caught here, before the disk is touched,
+            # instead of failing at useradd after partitioning.
+            case "$USERNAME" in
+                root|bin|daemon|mail|ftp|http|nobody|dbus|polkitd|rtkit|gdm|colord|\
+                avahi|geoclue|usbmux|flatpak|git|dnsmasq|saned|tss|uuidd|alpm|ntp|\
+                cups|lp|games|kvm|render|video|audio|input|wheel|users|storage|\
+                optical|adm|log|utmp|tty|disk|floppy|scanner|rfkill|sgx|\
+                systemd-*|nm-*)
+                    warn "'$USERNAME' is reserved by the system - please choose another."
+                    continue ;;
+            esac
+            if getent passwd "$USERNAME" >/dev/null 2>&1 || getent group "$USERNAME" >/dev/null 2>&1; then
+                warn "'$USERNAME' is already a system account - please choose another."
+                continue
+            fi
             break
         fi
         warn "Invalid username: '$USERNAME' - must start with a lowercase letter or underscore, and contain only lowercase letters, digits, hyphens, or underscores. Try again."
@@ -1076,8 +1323,8 @@ gather_input() {
     while true; do
         ask "LUKS passphrase:"
         read -rsp "  > " LUKS_PASS; echo
-        if [[ -z "$LUKS_PASS" ]]; then
-            warn "LUKS passphrase cannot be empty - please try again."
+        if [[ ${#LUKS_PASS} -lt 8 ]]; then
+            warn "LUKS passphrase must be at least 8 characters - it is the only thing protecting the disk."
             continue
         fi
         ask "Confirm LUKS passphrase:"
@@ -1089,16 +1336,7 @@ gather_input() {
         fi
     done
 
-    while true; do
-        echo
-        ask "Timezone (press Enter for Europe/Zurich):"
-        read -rp "  > " TIMEZONE
-        TIMEZONE=${TIMEZONE:-Europe/Zurich}
-        if timedatectl list-timezones 2>/dev/null | grep -qFx "$TIMEZONE"; then
-            break
-        fi
-        warn "Invalid timezone: '$TIMEZONE' - must match an entry from 'timedatectl list-timezones' (e.g. Europe/Zurich, America/New_York). Try again."
-    done
+    choose_timezone
 
     echo
     echo -e "  ${WHITE}${BOLD}CPU Vulnerability Mitigations${NC}"
@@ -1139,7 +1377,7 @@ confirm() {
     echo
     echo -e "  ${PINK}-- Configuration ---------------------------------${NC}"
     printf "  ${CYAN}-${NC}  %-22s ${WHITE}%s${NC}\n" "Bootloader:"    "Limine (UEFI)"
-    printf "  ${CYAN}-${NC}  %-22s ${WHITE}%s${NC}\n" "Keyboard:"      "$KEYMAP  (X11: $KEYMAP_X11)"
+    printf "  ${CYAN}-${NC}  %-22s ${WHITE}%s${NC}\n" "Keyboard:"      "$KEYBOARD_NAME  (console: $KEYMAP)"
     printf "  ${CYAN}-${NC}  %-22s ${WHITE}%s${NC}\n" "Kernel:"        "linux-cachyos (BORE - installed first-boot)"
     printf "  ${CYAN}-${NC}  %-22s ${WHITE}%s${NC}\n" "Encryption:"    "LUKS2"
     printf "  ${CYAN}-${NC}  %-22s ${WHITE}%s${NC}\n" "Filesystem:"    "Btrfs  -  @  @home  @snapshots  @var_log"
@@ -1180,12 +1418,20 @@ create_partition() {
     parted -s "$TARGET_DRIVE" mkpart primary "${FREE_START}MiB" "${PART_END}MiB" \
         || err "Failed to create partition on $TARGET_DRIVE"
 
-    partprobe "$TARGET_DRIVE"
-    sleep 2
+    partprobe "$TARGET_DRIVE" 2>/dev/null || true
 
-    PARTS_AFTER=$(lsblk -lno NAME "$TARGET_DRIVE" 2>/dev/null)
-    NEW_PART_NAME=$(diff <(echo "$PARTS_BEFORE") <(echo "$PARTS_AFTER") \
-        | grep '^>' | awk '{print $2}' | head -1)
+    # Wait for the kernel AND udev to publish the new node (up to ~10s)
+    # instead of a fixed sleep that is too short on some controllers.
+    NEW_PART_NAME=""
+    local _try
+    for _try in $(seq 1 20); do
+        udevadm settle --timeout=5 2>/dev/null || true
+        PARTS_AFTER=$(lsblk -lno NAME "$TARGET_DRIVE" 2>/dev/null)
+        NEW_PART_NAME=$(diff <(echo "$PARTS_BEFORE") <(echo "$PARTS_AFTER") \
+            | grep '^>' | awk '{print $2}' | head -1)
+        [[ -n "$NEW_PART_NAME" && -b "/dev/$NEW_PART_NAME" ]] && break
+        sleep 0.5
+    done
 
     [[ -n "$NEW_PART_NAME" ]] \
         || err "Could not identify new partition. Run: lsblk $TARGET_DRIVE"
@@ -1208,7 +1454,7 @@ setup_luks() {
     hr "LUKS2 Encryption Setup"
     log "Formatting $LUKS_PART with LUKS2..."
 
-    echo -n "$LUKS_PASS" | cryptsetup luksFormat \
+    printf '%s' "$LUKS_PASS" | cryptsetup luksFormat \
         --batch-mode \
         --type luks2 \
         "$LUKS_PART" \
@@ -1224,6 +1470,8 @@ setup_luks() {
     if cryptsetup luksHeaderBackup "$LUKS_PART" --header-backup-file "$LUKS_HEADER_BACKUP" 2>/dev/null; then
         chmod 600 "$LUKS_HEADER_BACKUP"
         log "LUKS header backed up to $LUKS_HEADER_BACKUP (copied to USB alongside the install log)"
+        info "Keep that backup private: it opens the disk with THIS passphrase even after you"
+        info "change it later. If the passphrase is ever exposed, change it AND delete the backup."
     else
         warn "Could not back up the LUKS header - you can run 'cryptsetup luksHeaderBackup' manually later"
     fi
@@ -1233,7 +1481,7 @@ setup_luks() {
     log "LUKS2 UUID: $LUKS_UUID"
 
     log "Opening container as /dev/mapper/$MAPPER..."
-    echo -n "$LUKS_PASS" | cryptsetup open \
+    printf '%s' "$LUKS_PASS" | cryptsetup open \
         "$LUKS_PART" "$MAPPER" \
         --key-file=- \
         || err "cryptsetup open failed on $LUKS_PART"
@@ -1359,6 +1607,19 @@ install_base() {
         && log "Mirrors updated" \
         || warn "reflector failed - using default mirrors"
 
+    # Speed: pacstrap downloads through the ISO's pacman.conf, which ships with
+    # ParallelDownloads commented out (i.e. one file at a time). Raising it here
+    # is the single biggest win on the 10-20 minute base install, and
+    # DisableDownloadTimeout stops a slow-but-alive mirror from aborting.
+    if grep -q '^#*ParallelDownloads' /etc/pacman.conf; then
+        sed -i 's/^#*ParallelDownloads.*/ParallelDownloads = 15/' /etc/pacman.conf
+    else
+        sed -i '/^\[options\]/a ParallelDownloads = 15' /etc/pacman.conf
+    fi
+    grep -q '^DisableDownloadTimeout' /etc/pacman.conf \
+        || sed -i '/^\[options\]/a DisableDownloadTimeout' /etc/pacman.conf
+    log "ISO pacman tuned: 15 parallel downloads, no download timeout"
+
     # Write vconsole.conf BEFORE pacstrap so mkinitcpio's keymap hook doesn't error
     mkdir -p /mnt/etc
     echo "KEYMAP=${KEYMAP}" > /mnt/etc/vconsole.conf
@@ -1368,9 +1629,8 @@ install_base() {
     until pacstrap /mnt \
         base base-devel linux linux-firmware \
         networkmanager wpa_supplicant iw efibootmgr \
-        sudo nano vim git wget curl python \
-        ntfs-3g ntfsprogs exfatprogs dosfstools mtools \
-        udisks2 gvfs \
+        sudo nano git wget curl python \
+        ntfs-3g dosfstools \
         btrfs-progs cryptsetup \
         limine \
         pipewire pipewire-alsa pipewire-pulse wireplumber \
@@ -1406,8 +1666,33 @@ enable_multilib() {
         log "multilib already enabled"
     fi
 
-    sed -i 's/^#ParallelDownloads.*/ParallelDownloads = 5/' /mnt/etc/pacman.conf
-    log "Parallel downloads set to 5"
+    if grep -q '^#*ParallelDownloads' /mnt/etc/pacman.conf; then
+        sed -i 's/^#*ParallelDownloads.*/ParallelDownloads = 15/' /mnt/etc/pacman.conf
+    else
+        sed -i '/^\[options\]/a ParallelDownloads = 15' /mnt/etc/pacman.conf
+    fi
+    grep -q '^DisableDownloadTimeout' /mnt/etc/pacman.conf \
+        || sed -i '/^\[options\]/a DisableDownloadTimeout' /mnt/etc/pacman.conf
+    log "Parallel downloads set to 15 (no download timeout)"
+
+    # Speed: makepkg defaults to ONE compile job and then re-compresses every
+    # built package with single-threaded zstd. The AUR builds at first boot are
+    # the slowest part of the whole install, and both of those are pure waste on
+    # a multi-core gaming machine.
+    #   MAKEFLAGS  - compile with every core
+    #   PKGEXT     - do not compress packages that are installed immediately
+    #   COMPRESSZST- multi-threaded, for anything that still is compressed
+    if [[ -f /mnt/etc/makepkg.conf ]]; then
+        sed -i -e 's/^#\?MAKEFLAGS=.*/MAKEFLAGS="-j\$(nproc)"/' \
+               -e "s/^#\?PKGEXT=.*/PKGEXT='.pkg.tar'/" \
+               -e 's/^#\?COMPRESSZST=.*/COMPRESSZST=(zstd -c -T0 --fast -)/' \
+               /mnt/etc/makepkg.conf
+        grep -q '^MAKEFLAGS=' /mnt/etc/makepkg.conf \
+            || echo 'MAKEFLAGS="-j$(nproc)"' >> /mnt/etc/makepkg.conf
+        grep -q '^PKGEXT=' /mnt/etc/makepkg.conf \
+            || echo "PKGEXT='.pkg.tar'" >> /mnt/etc/makepkg.conf
+        log "makepkg tuned: all cores, no package re-compression (faster AUR builds)"
+    fi
 
     # Force a real (dereferenced) resolv.conf into the chroot AND always append
     # public fallback resolvers (Cloudflare + Quad9). arch-chroot's bind-mount
@@ -1602,6 +1887,7 @@ install_packages() {
         dnsmasq \
         snapper snap-pac \
         vlc \
+        filezilla libreoffice-fresh signal-desktop \
         xorg-server \
         xorg-xwayland \
         libva-utils dmidecode \
@@ -1878,6 +2164,22 @@ bring_up() {
     return 0
 }
 
+# Turn on auto mode: the hotspot comes up at every boot and is restored after
+# an internet outage. Used by 'auto on' AND by 'start', so enabling the hotspot
+# later behaves exactly like choosing it during first boot.
+enable_auto() {
+    have_profile || { echo "Set up the hotspot first: niix-hotspot setup SSID [PASSWORD]"; return 3; }
+    # The dispatcher runs the hook that wakes the keeper on network events.
+    run_root systemctl enable --now NetworkManager-dispatcher.service >/dev/null 2>&1 \
+        || echo "Note: could not enable NetworkManager-dispatcher - the hotspot still recovers, just on the 15s timer."
+    if run_root systemctl enable --now "$SVC"; then
+        echo "Auto hotspot ON: kept up from boot and restored after internet outages."
+        return 0
+    fi
+    echo "Could not enable $SVC - the hotspot will not come back after a reboot." >&2
+    return 1
+}
+
 # setup/start argument handling: SSID defaults to NiiX-Arch; a missing
 # password is generated randomly and printed once.
 prepare_profile() {
@@ -1900,10 +2202,18 @@ case "$ACTION" in
             prepare_profile "${2:-}" "${3:-}" || exit 1
         fi
         bring_up; rc=$?
-        # Resume auto mode if it is enabled but was paused by 'stop'.
-        if [ "$rc" -eq 0 ] && systemctl is-enabled --quiet "$SVC" 2>/dev/null \
-            && ! systemctl is-active --quiet "$SVC" 2>/dev/null; then
-            systemctl start "$SVC" >/dev/null 2>&1 || true
+        if [ "$rc" -eq 0 ]; then
+            if systemctl is-enabled --quiet "$SVC" 2>/dev/null; then
+                # Resume auto mode if it is enabled but was paused by 'stop'.
+                systemctl is-active --quiet "$SVC" 2>/dev/null \
+                    || systemctl start "$SVC" >/dev/null 2>&1 || true
+            elif [ "${NIIX_HOTSPOT_ONCE:-0}" != "1" ]; then
+                # Setting the hotspot up later must give the same result as
+                # choosing it during first boot: on at every boot, with the same
+                # connectivity checks. NIIX_HOTSPOT_ONCE=1 starts it just once.
+                echo "Turning on auto mode so the hotspot also comes back after a reboot..."
+                enable_auto || true
+            fi
         fi
         exit "$rc"
         ;;
@@ -1928,9 +2238,7 @@ case "$ACTION" in
     auto)
         case "${2:-}" in
             on)
-                have_profile || { echo "Set up the hotspot first: niix-hotspot setup SSID [PASSWORD]"; exit 3; }
-                run_root systemctl enable --now "$SVC" \
-                    && echo "Auto hotspot ON: kept up from boot and restored after internet outages." ;;
+                enable_auto || exit $? ;;
             off)
                 run_root systemctl disable --now "$SVC" \
                     && echo "Auto hotspot OFF." ;;
@@ -2191,13 +2499,36 @@ ETHEOF
         for psk_file in "${IWD_DIR}"/*.psk; do
             [[ -f "$psk_file" ]] || continue
 
-            # SSID is the filename without the .psk extension
-            local ssid
-            ssid=$(basename "$psk_file" .psk)
-            [[ -z "$ssid" ]] && continue
+            # iwd names the file after the SSID only when it is letters,
+            # digits, space, '-' or '_'; any other SSID is stored as
+            # "=<hex of the raw bytes>". Decode both forms, and write the SSID
+            # into the NM keyfile as a byte list, which NM always reads back
+            # exactly - no escaping rules for quotes, ';' or accents.
+            local base ssid_info ssid_bytes ssid_label
+            base=$(basename "$psk_file" .psk)
+            if ! ssid_info=$(python3 - "$base" <<'SSIDPY'
+import sys
+base = sys.argv[1]
+try:
+    raw = bytes.fromhex(base[1:]) if base.startswith("=") else base.encode("utf-8")
+except ValueError:
+    sys.exit(1)
+if not 1 <= len(raw) <= 32:
+    sys.exit(1)
+print(";".join(str(b) for b in raw) + ";")
+label = "".join(c if (c.isalnum() or c in " -_.") else "_" for c in raw.decode("utf-8", "replace")).strip(" .")
+print(label or "wifi")
+SSIDPY
+            ); then
+                warn "iwd profile '$base' has an unreadable network name - skipping"
+                continue
+            fi
+            ssid_bytes=${ssid_info%%$'\n'*}
+            ssid_label=${ssid_info#*$'\n'}
 
             # Read the credential - iwd uses either PreSharedKey= (64-char hex)
-            # or Passphrase= (human-readable). NM accepts both in psk=.
+            # or Passphrase= (human-readable). NM accepts both in psk=. The
+            # value is copied verbatim: iwd and NM keyfiles escape the same way.
             local psk_value=""
             local psk_line
             psk_line=$(grep -m1 "^PreSharedKey=" "$psk_file" 2>/dev/null || true)
@@ -2210,24 +2541,31 @@ ETHEOF
             fi
 
             if [[ -z "$psk_value" ]]; then
-                warn "iwd profile '$ssid' has no PSK or Passphrase - skipping"
+                warn "iwd profile '$ssid_label' has no PSK or Passphrase - skipping"
                 continue
             fi
 
-            # Sanitise SSID for use as a filename: replace / and NUL with _
-            local safe_name
-            safe_name=$(printf '%s' "$ssid" | tr '/' '_')
+            # File name: the readable label, made unique.
+            local nm_file n=1
+            nm_file="/mnt/etc/NetworkManager/system-connections/${ssid_label}.nmconnection"
+            while [[ -e "$nm_file" ]]; do
+                n=$(( n + 1 ))
+                nm_file="/mnt/etc/NetworkManager/system-connections/${ssid_label}-${n}.nmconnection"
+            done
 
-            # Write a minimal NM keyfile - NM reads this on startup and connects
-            local nm_file="/mnt/etc/NetworkManager/system-connections/${safe_name}.nmconnection"
-            cat > "$nm_file" <<NMWIFI
+            # umask 077: the file holds the Wi-Fi password and must never
+            # exist world-readable, not even for a moment. NM also ignores
+            # keyfiles that are not 0600 root-owned.
+            (
+                umask 077
+                cat > "$nm_file" <<NMWIFI
 [connection]
-id=${ssid}
+id=${ssid_label}
 type=wifi
 autoconnect=true
 
 [wifi]
-ssid=${ssid}
+ssid=${ssid_bytes}
 mode=infrastructure
 
 [wifi-security]
@@ -2241,11 +2579,10 @@ method=auto
 method=auto
 addr-gen-mode=stable-privacy
 NMWIFI
-
-            # NM silently ignores keyfiles that are not chmod 600 owned by root
+            )
             chmod 600 "$nm_file"
 
-            log "WiFi imported: '$ssid' -> ${safe_name}.nmconnection"
+            log "WiFi imported: '$ssid_label' -> $(basename "$nm_file")"
             imported=$(( imported + 1 ))
         done
         [[ "$imported" -eq 0 ]] && warn "iwd profiles found but none could be imported"             || log "$imported WiFi profile(s) imported - will auto-connect on first boot"
@@ -2848,8 +3185,15 @@ install_desktop() {
         gnome-shell-extensions \
         gnome-menus \
         gnome-disk-utility \
-        gvfs-mtp gvfs-gphoto2 gvfs-afc gvfs-smb \
         || err "GNOME failed to install after retries"
+
+    # Extras that are NOT required for a working desktop go through the
+    # per-package fallback, so one renamed or temporarily unavailable package
+    # can never abort the whole install.
+    chroot_install \
+        gnome-text-editor \
+        ttf-hack-nerd \
+        gvfs-mtp gvfs-gphoto2 gvfs-afc gvfs-smb
 
     # The 'gnome' group pulls in a bunch of apps we don't want on a minimal
     # gaming install. Strip them right after the group install rather than
@@ -2876,6 +3220,7 @@ install_desktop() {
 
     # Quoted heredoc + explicit env (same reasoning as configure_system).
     arch-chroot /mnt env NX_USERNAME="$USERNAME" NX_KEYMAP_X11="$KEYMAP_X11" \
+        NX_KEYMAP_X11_VARIANT="$KEYMAP_X11_VARIANT" \
         bash <<'CHROOT'
 set -e
 systemctl enable gdm
@@ -2892,13 +3237,18 @@ AutomaticLogin=${NX_USERNAME}
 GDMEOF
 
 mkdir -p /etc/X11/xorg.conf.d
-cat > /etc/X11/xorg.conf.d/00-keyboard.conf <<EOF
-Section "InputClass"
-    Identifier "system-keyboard"
-    MatchIsKeyboard "on"
-    Option "XkbLayout" "${NX_KEYMAP_X11}"
-EndSection
-EOF
+# systemd-localed reads this file, and GNOME builds the user's input sources
+# from it on first login ("us,ru" becomes two switchable layouts).
+{
+    echo 'Section "InputClass"'
+    echo '    Identifier "system-keyboard"'
+    echo '    MatchIsKeyboard "on"'
+    echo "    Option \"XkbLayout\" \"${NX_KEYMAP_X11}\""
+    if [ -n "${NX_KEYMAP_X11_VARIANT:-}" ]; then
+        echo "    Option \"XkbVariant\" \"${NX_KEYMAP_X11_VARIANT}\""
+    fi
+    echo 'EndSection'
+} > /etc/X11/xorg.conf.d/00-keyboard.conf
 
 # NOTE: localectl is deliberately NOT used here - it needs a running systemd/dbus
 # and always fails inside a chroot (which would abort this set -e block).
@@ -2907,6 +3257,57 @@ CHROOT
     local desk_rc=$?
     [[ "$desk_rc" -eq 0 ]] \
         || err "GDM/desktop chroot configuration failed (exit $desk_rc) - check the log"
+
+    # Default app for text and script files: GNOME Text Editor, not vim.
+    # A system-wide /etc/xdg/mimeapps.list beats the defaults packages ship
+    # with, and each user can still override it in ~/.config/mimeapps.list.
+    mkdir -p /mnt/etc/xdg
+    cat > /mnt/etc/xdg/mimeapps.list <<'MIMEEOF'
+[Default Applications]
+text/plain=org.gnome.TextEditor.desktop
+text/markdown=org.gnome.TextEditor.desktop
+text/x-log=org.gnome.TextEditor.desktop
+text/csv=org.gnome.TextEditor.desktop
+text/xml=org.gnome.TextEditor.desktop
+application/xml=org.gnome.TextEditor.desktop
+application/json=org.gnome.TextEditor.desktop
+application/x-yaml=org.gnome.TextEditor.desktop
+application/toml=org.gnome.TextEditor.desktop
+application/x-shellscript=org.gnome.TextEditor.desktop
+text/x-shellscript=org.gnome.TextEditor.desktop
+application/x-sh=org.gnome.TextEditor.desktop
+application/x-perl=org.gnome.TextEditor.desktop
+text/x-python=org.gnome.TextEditor.desktop
+text/x-lua=org.gnome.TextEditor.desktop
+text/x-ruby=org.gnome.TextEditor.desktop
+text/x-php=org.gnome.TextEditor.desktop
+text/x-java=org.gnome.TextEditor.desktop
+text/javascript=org.gnome.TextEditor.desktop
+application/javascript=org.gnome.TextEditor.desktop
+text/css=org.gnome.TextEditor.desktop
+text/html=org.gnome.TextEditor.desktop
+text/x-csrc=org.gnome.TextEditor.desktop
+text/x-chdr=org.gnome.TextEditor.desktop
+text/x-c++src=org.gnome.TextEditor.desktop
+text/x-c++hdr=org.gnome.TextEditor.desktop
+text/x-makefile=org.gnome.TextEditor.desktop
+text/x-cmake=org.gnome.TextEditor.desktop
+text/x-diff=org.gnome.TextEditor.desktop
+text/x-patch=org.gnome.TextEditor.desktop
+text/x-sql=org.gnome.TextEditor.desktop
+text/x-ini=org.gnome.TextEditor.desktop
+application/x-desktop=org.gnome.TextEditor.desktop
+application/x-executable=org.gnome.TextEditor.desktop
+application/octet-stream=org.gnome.TextEditor.desktop
+MIMEEOF
+    chmod 644 /mnt/etc/xdg/mimeapps.list
+    arch-chroot /mnt update-desktop-database /usr/share/applications 2>/dev/null || true
+    log "Text Editor set as the default for text, script and unknown (.bin) files"
+
+    # Console editor for sudoedit/visudo/git: nano (vim is not installed).
+    grep -q '^EDITOR=' /mnt/etc/environment 2>/dev/null || {
+        printf 'EDITOR=nano\nVISUAL=nano\n' >> /mnt/etc/environment
+    }
     # A missing display-manager link means the machine boots to a text console.
     [[ -L /mnt/etc/systemd/system/display-manager.service ]] \
         && [[ "$(readlink /mnt/etc/systemd/system/display-manager.service)" == */gdm.service ]] \
@@ -3042,6 +3443,10 @@ setup_storage() {
     # a disk is attached later) by a small root service, so GNOME Files shows
     # them in the sidebar and they are usable without a click. Hibernated or
     # unclean volumes fall back to read-only rather than risking the data.
+    # Filesystem tools and the automount backend. Non-fatal on purpose: none of
+    # them is needed to boot, and GNOME already pulled in udisks2 and gvfs.
+    chroot_install ntfsprogs exfatprogs mtools udisks2 gvfs
+
     info "Installing NTFS auto-mount..."
     cat > /mnt/usr/local/bin/niix-ntfs <<'NTFSEOF'
 #!/bin/bash
@@ -3064,6 +3469,7 @@ NTFS_UMASK=0022
 EXCLUDE_UUIDS=""
 INCLUDE_REMOVABLE=0
 EXTRA_OPTIONS=""
+WINDOWS_RW=0
 CONF=/etc/niix-ntfs.conf
 # shellcheck source=/dev/null
 [ -r "$CONF" ] && . "$CONF"
@@ -3146,46 +3552,55 @@ skip_reason() {
     fi
 }
 
-# Windows system volumes get a recognisable name when they have no label.
-probe_name() {
-    local dev="$1" uuid="$2" label name probe
+# Looks inside the volume (read-only, briefly) once, and sets:
+#   PROBE_WINDOWS  true when it holds an installed Windows (\Windows\System32)
+#   PROBE_NAME     the mount-point name: the label, else "Windows" for a
+#                  Windows system volume, else NTFS-<uuid>; made unique.
+probe_volume() {
+    local dev="$1" uuid="$2" label probe
+    PROBE_WINDOWS=false
+    probe="$STATE_DIR/probe"
+    mkdir -p "$probe"
+    if mount -t ntfs3 -o ro "$dev" "$probe" 2>/dev/null 9>&- \
+        || mount -t ntfs-3g -o ro "$dev" "$probe" 2>/dev/null 9>&-; then
+        [ -d "$probe/Windows/System32" ] && PROBE_WINDOWS=true
+        umount "$probe" 2>/dev/null
+    fi
+    rmdir "$probe" 2>/dev/null
+
     label=$(blkid -s LABEL -o value "$dev" 2>/dev/null)
-    name=$(sanitize "$label")
-    if [ -z "$name" ]; then
-        probe="$STATE_DIR/probe"
-        mkdir -p "$probe"
-        if mount -t ntfs3 -o ro "$dev" "$probe" 2>/dev/null 9>&- \
-            || mount -t ntfs-3g -o ro "$dev" "$probe" 2>/dev/null 9>&-; then
-            [ -d "$probe/Windows/System32" ] && name=Windows
-            umount "$probe" 2>/dev/null
+    PROBE_NAME=$(sanitize "$label")
+    if [ -z "$PROBE_NAME" ]; then
+        if [ "$PROBE_WINDOWS" = true ]; then
+            PROBE_NAME=Windows
+        else
+            PROBE_NAME="NTFS-${uuid:0:8}"
         fi
-        rmdir "$probe" 2>/dev/null
-        [ -z "$name" ] && name="NTFS-${uuid:0:8}"
     fi
     # Keep names unique: a second volume with the same label gets its UUID.
-    if mountpoint -q "$MOUNT_ROOT/$name" 2>/dev/null || [ -e "$MOUNT_ROOT/$name" ]; then
-        if ! [ -d "$MOUNT_ROOT/$name" ] || [ -n "$(ls -A "$MOUNT_ROOT/$name" 2>/dev/null)" ]; then
-            name="${name}-${uuid:0:8}"
+    if mountpoint -q "$MOUNT_ROOT/$PROBE_NAME" 2>/dev/null || [ -e "$MOUNT_ROOT/$PROBE_NAME" ]; then
+        if ! [ -d "$MOUNT_ROOT/$PROBE_NAME" ] || [ -n "$(ls -A "$MOUNT_ROOT/$PROBE_NAME" 2>/dev/null)" ]; then
+            PROBE_NAME="${PROBE_NAME}-${uuid:0:8}"
         fi
     fi
-    printf '%s' "$name"
 }
 
 # Read-write with the kernel driver first, then the FUSE driver, then
 # read-only. A volume left hibernated by Windows Fast Startup cannot be
 # written safely, and both drivers refuse it - read-only is the correct,
 # non-destructive outcome there.
+# mount_one DEVICE TARGET [ro]   - "ro" skips the read-write attempts
 mount_one() {
-    local dev="$1" target="$2" common driver=""
+    local dev="$1" target="$2" want="${3:-rw}" common driver=""
     common="noatime,nosuid,nodev,uid=$NTFS_UID,gid=$NTFS_GID,umask=$NTFS_UMASK,windows_names"
     [ -n "$EXTRA_OPTIONS" ] && common="$common,$EXTRA_OPTIONS"
 
     # 9>&- on every mount: the ntfs-3g FUSE daemon stays alive for the life of
     # the mount and would otherwise inherit the lock fd and hold it forever,
     # deadlocking every later run of this script.
-    if mount -t ntfs3 -o "rw,$common" "$dev" "$target" 2>/dev/null 9>&-; then
+    if [ "$want" != ro ] && mount -t ntfs3 -o "rw,$common" "$dev" "$target" 2>/dev/null 9>&-; then
         driver=ntfs3
-    elif mount -t ntfs-3g -o "rw,$common" "$dev" "$target" 2>/dev/null 9>&-; then
+    elif [ "$want" != ro ] && mount -t ntfs-3g -o "rw,$common" "$dev" "$target" 2>/dev/null 9>&-; then
         driver=ntfs-3g
     elif mount -t ntfs3 -o "ro,$common" "$dev" "$target" 2>/dev/null 9>&-; then
         driver=ntfs3
@@ -3198,7 +3613,11 @@ mount_one() {
 
     # Report what the kernel actually gave us: asking for rw does not always
     # get it (a hibernated volume, a dirty volume, or read-only hardware).
-    if findmnt -rn -o OPTIONS -M "$target" 2>/dev/null | grep -qE '(^|,)ro(,|$)'; then
+    if [ "$want" = ro ]; then
+        msg "mounted $dev -> $target ($driver, read-only: Windows system drive)"
+        msg "  Protects Windows from accidental changes. To allow writing, set"
+        msg "  WINDOWS_RW=1 in $CONF (Fast Startup must be off in Windows)."
+    elif findmnt -rn -o OPTIONS -M "$target" 2>/dev/null | grep -qE '(^|,)ro(,|$)'; then
         msg "mounted $dev -> $target ($driver, READ-ONLY)"
         msg "  Writing is blocked because the volume is hibernated, was not shut down"
         msg "  cleanly, or the disk itself is read-only. In Windows turn off Fast Startup"
@@ -3215,16 +3634,18 @@ do_mount() {
     [ "$ENABLED" = "1" ] || { msg "disabled in $CONF"; return 0; }
     resolve_owner
     mkdir -p "$MOUNT_ROOT" "$STATE_DIR"
-    local dev uuid reason name target mounted=0
+    local dev uuid reason target want mounted=0
 
     while IFS= read -r dev; do
         uuid=$(blkid -s UUID -o value "$dev" 2>/dev/null)
         reason=$(skip_reason "$dev" "$uuid")
         [ -n "$reason" ] && continue
-        name=$(probe_name "$dev" "$uuid")
-        target="$MOUNT_ROOT/$name"
+        probe_volume "$dev" "$uuid"
+        target="$MOUNT_ROOT/$PROBE_NAME"
+        want=rw
+        [ "$PROBE_WINDOWS" = true ] && [ "$WINDOWS_RW" != "1" ] && want=ro
         mkdir -p "$target" || { warn "could not create $target"; continue; }
-        if mount_one "$dev" "$target"; then
+        if mount_one "$dev" "$target" "$want"; then
             printf '%s\n' "$target" >> "$STATE_DIR/mounts"
             mounted=$((mounted + 1))
         else
@@ -3333,6 +3754,16 @@ NTFSEOF
 
 # Extra mount options appended to the defaults.
 #EXTRA_OPTIONS="prealloc"
+
+# A drive holding an installed Windows (\Windows\System32) is mounted
+# read-only, so nothing on the Linux side can damage it by accident. Data
+# drives are always read-write. Set to 1 to make the Windows drive writable
+# too - only with Fast Startup turned off in Windows.
+#WINDOWS_RW=1
+
+# Repair dirty USB filesystems (NTFS/FAT/exFAT) when they are plugged in, so
+# they mount read-write instead of read-only. Set to 0 to never touch them.
+#USB_AUTOFIX=0
 NTFSCONFEOF
         chmod 644 /mnt/etc/niix-ntfs.conf
     fi
@@ -3375,17 +3806,130 @@ NTFSUDEVEOF
     if [[ ! -f /mnt/etc/udisks2/mount_options.conf ]]; then
         cat > /mnt/etc/udisks2/mount_options.conf <<'UDISKSEOF'
 # Removable media mounted by GNOME Files / udisks2.
-# Without this, udisks mounts NTFS and other foreign filesystems as root-owned,
-# so the desktop user can read but not write them. $UID/$GID are substituted by
-# udisks with the user doing the mounting - they are not shell variables.
+# Out of the box udisks mounts foreign filesystems root-owned, so the desktop
+# user can read but not write them. $UID/$GID are placeholders udisks fills in
+# with the user doing the mounting - they are NOT shell variables.
+# Key names and driver names must match udisks' own builtin_mount_options.conf:
+# the drivers are "ntfs" (ntfs-3g FUSE / legacy kernel) and "ntfs3" (kernel).
 [defaults]
+
+# Prefer ntfs-3g on removable media: slower than ntfs3, but the more forgiving
+# of the two with half-unplugged sticks and unclean Windows shutdowns. Falls
+# back to the kernel ntfs3 driver if ntfs-3g is missing.
+ntfs_drivers=ntfs,ntfs3
+ntfs:ntfs_defaults=uid=$UID,gid=$GID,noatime,windows_names,big_writes
+ntfs:ntfs_allow=uid=$UID,gid=$GID,umask,dmask,fmask,locale,norecover,ignore_case,windows_names,compression,nocompression,big_writes
 ntfs:ntfs3_defaults=uid=$UID,gid=$GID,noatime,windows_names
-ntfs:ntfs3_allow=uid=$UID,gid=$GID,umask,dmask,fmask,iocharset,discard,nodiscard,sparse,nosparse,hidden,nohidden,sys_immutable,showmeta,noshowmeta,prealloc,noprealloc,hide_dot_files,nohide_dot_files,windows_names,nocase,case
-ntfs:ntfs_defaults=uid=$UID,gid=$GID,noatime
+ntfs:ntfs3_allow=uid=$UID,gid=$GID,umask,dmask,fmask,iocharset,discard,nodiscard,sparse,nosparse,hidden,nohidden,sys_immutable,nosys_immutable,showmeta,noshowmeta,prealloc,noprealloc,hide_dot_files,nohide_dot_files,windows_names,nocase,case
+
+# errors=continue keeps a stick writable through a transient error instead of
+# flipping it read-only mid-copy; the filesystem is marked dirty and niix-usb-
+# autofix repairs it on the next plug-in. "errors" is not in udisks' builtin
+# allow list for these filesystems, so it is added below.
+vfat_defaults=uid=$UID,gid=$GID,shortname=mixed,utf8=1,showexec,flush,errors=continue
+vfat_allow=uid=$UID,gid=$GID,flush,utf8,shortname,umask,dmask,fmask,codepage,iocharset,usefree,showexec,errors
+exfat_defaults=uid=$UID,gid=$GID,iocharset=utf8,errors=continue
+exfat_allow=uid=$UID,gid=$GID,umask,dmask,fmask,allow_utime,iocharset,errors,discard,keep_last_dots,sys_tz,time_offset,zero_size_dir,namecase,codepage
 UDISKSEOF
         chmod 644 /mnt/etc/udisks2/mount_options.conf
     fi
-    log "Removable media: auto-mounted read-write by GNOME (udisks2)"
+
+    # A stick left dirty by Windows, or yanked out mid-write, otherwise mounts
+    # read-only and every copy to it fails. This repairs it at plug-in time,
+    # before udisks mounts it - checking first and only writing when the check
+    # reports a problem. Disable with USB_AUTOFIX=0 in /etc/niix-ntfs.conf.
+    cat > /mnt/usr/local/bin/niix-usb-autofix <<'USBFIXEOF'
+#!/bin/bash
+# niix-usb-autofix DEVICE FSTYPE
+# Run from udev the moment a USB filesystem appears and before udisks mounts
+# it, so a stick left dirty by Windows (or by being yanked out) is repaired and
+# mounts read-write instead of read-only.
+# Deliberately conservative:
+#   - never touches a filesystem that is already mounted
+#   - checks first, and only writes when the check reports a problem
+#   - a volume hibernated by Windows is left alone: clearing its dirty flag
+#     would not make writing safe, and both NTFS drivers refuse it anyway
+#   - every tool runs under a timeout so a udev worker can never wedge
+# Turn it off with USB_AUTOFIX=0 in /etc/niix-ntfs.conf
+# Log: journalctl -t niix-usb-autofix
+set -u
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+
+USB_AUTOFIX=1
+CONF=/etc/niix-ntfs.conf
+# shellcheck source=/dev/null
+[ -r "$CONF" ] && . "$CONF"
+[ "${USB_AUTOFIX:-1}" = "1" ] || exit 0
+
+DEV="${1:-}"
+FS="${2:-}"
+[ -b "$DEV" ] || exit 0
+
+say() { logger -t niix-usb-autofix -- "$*" 2>/dev/null || true; }
+
+# Anything already mounted is off limits - repairing a mounted filesystem
+# corrupts it.
+findmnt -rn -S "$DEV" >/dev/null 2>&1 && exit 0
+
+case "$FS" in
+    ntfs)
+        command -v ntfsfix >/dev/null 2>&1 || exit 0
+        # Without the probe there is no safe way to tell "unclean" from
+        # "hibernated", so do nothing rather than guess.
+        command -v ntfs-3g.probe >/dev/null 2>&1 || exit 0
+        timeout 20 ntfs-3g.probe --readwrite "$DEV" >/dev/null 2>&1
+        rc=$?
+        # ntfs-3g.probe(8): 0 mountable, 14 hibernated, 15 not cleanly
+        # unmounted. Only 15 is repaired: that is the yanked-out / Windows-
+        # crashed case ntfsfix exists for. Hibernated (Fast Startup), corrupt,
+        # in-use or unknown volumes are left untouched.
+        case "$rc" in
+            0)  exit 0 ;;
+            14) say "$DEV: hibernated by Windows - left alone (turn off Fast Startup and shut down fully)"
+                exit 0 ;;
+            15) ;;
+            *)  say "$DEV: not repairable automatically (ntfs-3g.probe code $rc) - left alone"
+                exit 0 ;;
+        esac
+        if out=$(timeout 45 ntfsfix -d "$DEV" 2>&1); then
+            say "$DEV: NTFS was not cleanly unmounted - repaired, mounts read-write now"
+        else
+            say "$DEV: ntfsfix failed: $(printf '%s' "$out" | tail -1)"
+        fi
+        ;;
+    vfat)
+        command -v fsck.fat >/dev/null 2>&1 || exit 0
+        timeout 20 fsck.fat -n "$DEV" >/dev/null 2>&1 && exit 0
+        if out=$(timeout 45 fsck.fat -a "$DEV" 2>&1); then
+            say "$DEV: FAT repaired"
+        else
+            say "$DEV: fsck.fat could not repair it: $(printf '%s' "$out" | tail -1)"
+        fi
+        ;;
+    exfat)
+        command -v fsck.exfat >/dev/null 2>&1 || exit 0
+        timeout 20 fsck.exfat -n "$DEV" >/dev/null 2>&1 && exit 0
+        if out=$(timeout 45 fsck.exfat -p "$DEV" 2>&1); then
+            say "$DEV: exFAT repaired"
+        else
+            say "$DEV: fsck.exfat could not repair it: $(printf '%s' "$out" | tail -1)"
+        fi
+        ;;
+esac
+exit 0
+USBFIXEOF
+    chmod 755 /mnt/usr/local/bin/niix-usb-autofix
+
+    cat > /mnt/etc/udev/rules.d/99-niix-usb-autofix.rules <<'USBUDEVEOF'
+# Repair a dirty USB filesystem the moment it is plugged in, before udisks
+# mounts it - otherwise it mounts read-only and copying to it fails.
+# "add" only, so an already-mounted filesystem is never touched. The helper
+# checks before it writes and gives up rather than blocking a udev worker.
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", ENV{ID_FS_USAGE}=="filesystem", ENV{ID_FS_TYPE}=="ntfs|vfat|exfat", RUN+="/usr/bin/timeout 55 /usr/local/bin/niix-usb-autofix $env{DEVNAME} $env{ID_FS_TYPE}"
+USBUDEVEOF
+    chmod 644 /mnt/etc/udev/rules.d/99-niix-usb-autofix.rules
+
+    log "Removable media: auto-mounted read-write by GNOME, dirty filesystems repaired on plug-in"
 }
 
 rebuild_initramfs() {
@@ -3579,6 +4123,8 @@ setup_firstboot() {
 ${USERNAME} ALL=(ALL) NOPASSWD: ALL
 SUDOEOF
     chmod 440 /mnt/etc/sudoers.d/niixarch-firstboot
+    arch-chroot /mnt visudo -cf /etc/sudoers.d/niixarch-firstboot >/dev/null \
+        || { rm -f /mnt/etc/sudoers.d/niixarch-firstboot; err "Temporary first-boot sudo rule failed validation"; }
     log "Temporary passwordless sudo configured for first-boot"
 
     # Belt-and-suspenders: force-remove the drop-in 2h after boot regardless
@@ -3587,12 +4133,28 @@ SUDOEOF
     # end of a successful run both only fire if firstboot actually launched -
     # neither covers "the autostart never fired at all", which would
     # otherwise leave passwordless root sitting there indefinitely.
+    # The check never pulls sudo out from under a first boot that is still
+    # running (a slow connection can push it past 2h), but has a hard 12h cap
+    # so a first boot stuck waiting for a network can't hold root open forever.
+    # First boot disables the timer itself when it finishes.
+    install -d -m 755 /mnt/usr/local/lib/niixarch
+    cat > /mnt/usr/local/lib/niixarch/sudo-expiry-check <<'EXPCEOF'
+#!/bin/sh
+# exit 0 = remove the temporary first-boot sudo rule now; 1 = not yet.
+up=$(cut -d. -f1 /proc/uptime)
+[ "$up" -ge 7200 ] || exit 1
+[ "$up" -ge 43200 ] && exit 0
+pgrep -f 'niixarch-firstboot[.]sh' >/dev/null 2>&1 && exit 1
+exit 0
+EXPCEOF
+    chmod 755 /mnt/usr/local/lib/niixarch/sudo-expiry-check
     cat > /mnt/etc/systemd/system/niixarch-sudo-expiry.service <<'EXPEOF'
 [Unit]
 Description=NiiX first-boot passwordless sudo expiry (safety net)
 
 [Service]
 Type=oneshot
+ExecCondition=/usr/local/lib/niixarch/sudo-expiry-check
 ExecStart=/usr/bin/rm -f /etc/sudoers.d/niixarch-firstboot
 EXPEOF
     cat > /mnt/etc/systemd/system/niixarch-sudo-expiry.timer <<'EXPTEOF'
@@ -3601,30 +4163,29 @@ Description=NiiX first-boot passwordless sudo expiry timer (safety net)
 
 [Timer]
 OnBootSec=2h
-Persistent=true
+OnCalendar=*:0/15
+AccuracySec=1min
 
 [Install]
 WantedBy=timers.target
 EXPTEOF
     arch-chroot /mnt systemctl enable niixarch-sudo-expiry.timer 2>/dev/null || true
-    log "Passwordless sudo will auto-expire after 2h even if first-boot never runs"
+    log "Passwordless sudo expires after first boot (safety net: 2h if it never runs, 12h hard cap)"
 
     # Save hardware config for first-boot script
-    cat > /mnt/etc/niixarch.conf <<CONFEOF
-GPU_VENDOR=$GPU_VENDOR
-CPU_VENDOR=$CPU_VENDOR
-GPU_MODEL="$GPU_MODEL"
-GPU_GEN=$GPU_GEN
-NVIDIA_LEGACY=$NVIDIA_LEGACY
-HAS_NVIDIA=$HAS_NVIDIA
-HAS_AMD=$HAS_AMD
-HAS_INTEL=$HAS_INTEL
-IS_HYBRID=$IS_HYBRID
-OFFLOAD_MODE=$OFFLOAD_MODE
-DGPU_PCI=$DGPU_PCI
-DRI_PRIME_TAG=$DRI_PRIME_TAG
-IS_DUALBOOT=$([[ "$INSTALL_MODE" == "dualboot" ]] && echo true || echo false)
-CONFEOF
+    # First boot 'source's this file, so every value is shell-quoted (%q): a
+    # quote or '$' in a hardware name can never break it or run as code.
+    # (No-op reference: these two are otherwise only read via ${!v} below,
+    # which static analysis cannot see.)
+    : "${NVIDIA_LEGACY-}" "${DRI_PRIME_TAG-}"
+    {
+        local v
+        for v in GPU_VENDOR CPU_VENDOR GPU_MODEL GPU_GEN NVIDIA_LEGACY HAS_NVIDIA \
+                 HAS_AMD HAS_INTEL IS_HYBRID OFFLOAD_MODE DGPU_PCI DRI_PRIME_TAG; do
+            printf '%s=%q\n' "$v" "${!v-}"
+        done
+        printf 'IS_DUALBOOT=%s\n' "$([[ "$INSTALL_MODE" == "dualboot" ]] && echo true || echo false)"
+    } > /mnt/etc/niixarch.conf
 
     # Write the first-boot script
     cat > /mnt/usr/local/bin/niixarch-firstboot.sh <<'FBEOF'
@@ -3638,7 +4199,8 @@ source /etc/niixarch.conf 2>/dev/null || true
 # Fail-safe: the temporary passwordless-sudo drop-in must never survive first-boot,
 # however this script exits (success, error, or interruption). It is also removed
 # explicitly at the end; this trap covers every early-exit path.
-trap 'sudo rm -f /etc/sudoers.d/niixarch-firstboot 2>/dev/null || true' EXIT
+# sudo -n: if the rule is already gone, fail silently instead of prompting.
+trap 'sudo -n rm -f /etc/sudoers.d/niixarch-firstboot 2>/dev/null || true' EXIT
 
 GREEN='\033[38;5;118m'
 PINK='\033[38;5;205m'
@@ -3827,8 +4389,9 @@ if [[ "$HOTSPOT_ENABLE" =~ ^[Yy]$ ]]; then
     # the hotspot up: switching Wi-Fi to hotspot mode now could cut the
     # internet the rest of this first-boot needs. It comes up after the reboot.
     if sudo niix-hotspot setup "$HOTSPOT_SSID" "$HOTSPOT_PASS"; then
-        if sudo systemctl enable NetworkManager-dispatcher.service niix-hotspot-watchdog.service 2>/dev/null; then
-            log "Hotspot '${HOTSPOT_SSID}' auto mode ON from the next boot (show password: niix-hotspot password)"
+        # Exactly the command a user runs later - one code path, one behaviour.
+        if sudo niix-hotspot auto on; then
+            log "Hotspot '${HOTSPOT_SSID}' auto mode ON (show password: niix-hotspot password)"
         else
             warn "Could not enable hotspot auto mode - enable later: niix-hotspot auto on"
         fi
@@ -3837,7 +4400,21 @@ if [[ "$HOTSPOT_ENABLE" =~ ^[Yy]$ ]]; then
     fi
     unset HOTSPOT_PASS
 else
-    log "Hotspot auto mode skipped - any time: niix-hotspot start [SSID] [PASSWORD], then niix-hotspot auto on"
+    log "Hotspot auto mode skipped - turn it on any time with: niix-hotspot start [SSID] [PASSWORD]"
+    log "  (that also enables auto mode, so it behaves exactly as if chosen here)"
+fi
+
+# -- vim: not part of NiiX (GNOME Text Editor + nano are the editors) --------
+# Only removed when nothing else needs it - an -Rns that would cascade into
+# other packages is not worth it for a text editor.
+if pacman -Q vim &>/dev/null; then
+    if pacman -Qi vim 2>/dev/null | grep -q '^Required By *: *None'; then
+        sudo pacman -Rns --noconfirm vim >/dev/null 2>&1 \
+            && log "vim removed (Text Editor and nano are the defaults)" \
+            || warn "Could not remove vim - harmless, it is just unused"
+    else
+        info "vim kept: another installed package requires it"
+    fi
 fi
 
 # -- Bluetooth - ensure service is running ----------------
@@ -4220,6 +4797,7 @@ EXT_LIST=(
     dash-to-panel@jderose9.github.com
     arcmenu@arcmenu.com
     screen-rotate@shyzus.github.io
+    tiling-assistant@leleat-on-github
 )
 ext_total=${#EXT_LIST[@]}; ext_i=0; ext_failed=()
 ui_bar 0 "$ext_total" "extensions"
@@ -4229,7 +4807,7 @@ for ext in "${EXT_LIST[@]}"; do
     ui_bar "$ext_i" "$ext_total" "${ext%%@*}"
 done
 if [ "${#ext_failed[@]}" -eq 0 ]; then
-    log "Extensions installed: dash-to-panel, ArcMenu, screen-rotate"
+    log "Extensions installed: dash-to-panel, ArcMenu, screen-rotate, Tiling Assistant"
 else
     for e in "${ext_failed[@]}"; do warn "Could not fetch $e from extensions.gnome.org"; done
     # Fallback: dash-to-panel and ArcMenu are also packaged (signed) in Arch's
@@ -4264,6 +4842,25 @@ if [ ! -d "$EXT_DIR/screen-rotate@shyzus.github.io" ]; then
         rm -rf /tmp/screen-autorotate
         log "screen-rotate installed from source"
     fi
+fi
+
+# Source fallback for Tiling Assistant (quarter-screen snapping), pinned to a
+# release tag. Its upstream build step is only schema compilation (plus
+# optional translations), so a checked-out copy is a complete extension.
+if [ ! -d "$EXT_DIR/tiling-assistant@leleat-on-github" ]; then
+    info "Installing Tiling Assistant from source (fallback)..."
+    rm -rf /tmp/tiling-assistant
+    if git clone --depth 1 --branch v55 \
+        https://github.com/Leleat/Tiling-Assistant.git /tmp/tiling-assistant 2>/dev/null \
+        && [ -f /tmp/tiling-assistant/tiling-assistant@leleat-on-github/metadata.json ]; then
+        mkdir -p "$EXT_DIR"
+        cp -r /tmp/tiling-assistant/tiling-assistant@leleat-on-github "$EXT_DIR/"
+        glib-compile-schemas "$EXT_DIR/tiling-assistant@leleat-on-github/schemas" 2>/dev/null || true
+        log "Tiling Assistant installed from source"
+    else
+        warn "Tiling Assistant unavailable - GNOME's built-in snapping (halves + maximise) still works"
+    fi
+    rm -rf /tmp/tiling-assistant
 fi
 
 # -- Configure the NiiX desktop via dconf -----------------
@@ -4318,12 +4915,28 @@ hide-lock-rotate=false
 debug-logging=false
 ROT
 
+# Window snapping (Tiling Assistant): drag to the top edge = full screen,
+# left/right edge = half, any corner = quarter. It turns GNOME's own edge
+# tiling off while it runs and back on if it is ever disabled.
+#   enable-layout-picker=false          no Windows-11-style drop-down at the top
+#   enable-tiling-popup=false           no "pick a window for the other half"
+#   enable-raise-tile-group=false       clicking a tiled window raises only it
+#   toggle-maximize-tophalf-timer=max   holding at the top never turns
+#                                       "full screen" into "top half"
+dconf load /org/gnome/shell/extensions/tiling-assistant/ <<'TILING'
+[/]
+enable-layout-picker=false
+enable-tiling-popup=false
+enable-raise-tile-group=false
+toggle-maximize-tophalf-timer=2147483647
+TILING
+
 # Enable every extension + pin apps (Lutris included) for the next login
 dconf load /org/gnome/shell/ <<'SHELLD'
 [/]
 disable-user-extensions=false
-enabled-extensions=['appindicatorsupport@rgcjonas.gmail.com', 'dash-to-panel@jderose9.github.com', 'arcmenu@arcmenu.com', 'screen-rotate@shyzus.github.io', 'ddterm@amezin.github.com', 'system-monitor@gnome-shell-extensions.gcampax.github.com']
-favorite-apps=['org.gnome.Nautilus.desktop', 'helium.desktop', 'net.lutris.Lutris.desktop', 'steam.desktop', 'com.heroicgameslauncher.hgl.desktop', 'com.stremio.Stremio.desktop']
+enabled-extensions=['appindicatorsupport@rgcjonas.gmail.com', 'dash-to-panel@jderose9.github.com', 'arcmenu@arcmenu.com', 'screen-rotate@shyzus.github.io', 'tiling-assistant@leleat-on-github', 'ddterm@amezin.github.com', 'system-monitor@gnome-shell-extensions.gcampax.github.com']
+favorite-apps=['org.gnome.Nautilus.desktop', 'helium.desktop', 'org.gnome.TextEditor.desktop', 'net.lutris.Lutris.desktop', 'steam.desktop', 'com.heroicgameslauncher.hgl.desktop', 'com.ktechpit.whatsie.desktop', 'signal-desktop.desktop', 'com.stremio.Stremio.desktop']
 SHELLD
 
 # System Monitor is bundled with gnome-shell-extensions (already installed) -
@@ -4940,17 +5553,40 @@ REFRESHEOF
 sudo chmod +x /usr/local/bin/niixarch-refresh-clean
 
 # -- yay ---------------------------------------------------
+# Prefer the CachyOS repo's yay: prebuilt and signed, so no Go toolchain
+# download and no compile. Fall back to building it from the AUR, with
+# retries, and only report success when the binary really exists.
 if ! command -v yay &>/dev/null; then
     info "Installing yay (AUR helper)..."
-    cd /tmp && rm -rf yay
-    git clone https://aur.archlinux.org/yay.git
-    cd yay && makepkg -si --noconfirm
-    cd ~
-    log "yay installed"
+    if grep -q '^\[cachyos\]' /etc/pacman.conf \
+        && pac_retry -S --noconfirm --needed yay \
+        && command -v yay &>/dev/null; then
+        log "yay installed (prebuilt, signed - CachyOS repo)"
+    else
+        info "Prebuilt yay unavailable - building it from the AUR..."
+        YAY_TMP=$(mktemp -d /tmp/niix-yay-XXXXXX)
+        for attempt in 1 2 3; do
+            rm -rf "$YAY_TMP/yay"
+            if git clone --depth 1 https://aur.archlinux.org/yay.git "$YAY_TMP/yay" \
+                && ( cd "$YAY_TMP/yay" && makepkg -si --noconfirm ) \
+                && command -v yay &>/dev/null; then
+                break
+            fi
+            warn "yay build attempt $attempt/3 failed, retrying..."
+            sleep 5
+        done
+        rm -rf "$YAY_TMP"
+        if command -v yay &>/dev/null; then
+            log "yay installed (built from the AUR)"
+        else
+            warn "yay could not be installed - AUR packages will be skipped (retry: re-run this script)"
+        fi
+    fi
 fi
 
 aur_install() {
     local pkg="$1" attempt=1
+    command -v yay &>/dev/null || { warn "$pkg skipped - yay is not installed"; return 1; }
     while [ "$attempt" -le 3 ]; do
         yay -S --noconfirm --needed "$pkg" 2>&1 && return 0
         warn "$pkg attempt $attempt/3 failed, retrying..."
@@ -4960,8 +5596,44 @@ aur_install() {
     return 1
 }
 
+# -- Flatpak apps: started FIRST, in the background ---------------------------
+# Flatpak downloads are network-bound and AUR builds are CPU-bound, so running
+# them at the same time cuts several minutes off first boot. Flatpak never
+# touches the pacman database or lock, so there is nothing to race. Output goes
+# to a file and is printed in full once it finishes, so the log stays readable
+# instead of interleaved.
+# sudo: a system-wide flatpak install from a user session pops an interactive
+# polkit password dialog, which stalls the unattended first-boot flow.
+info "Starting Flatpak downloads in the background (they run while the AUR packages build)..."
+sudo flatpak remote-add --if-not-exists flathub \
+    https://dl.flathub.org/repo/flathub.flatpakrepo || warn "Could not add Flathub remote"
+
+flatpak_install() { sudo flatpak install -y --noninteractive flathub "$1"; }
+
+FLATPAK_LOG=$(mktemp /tmp/niix-flatpak-XXXXXX.log 2>/dev/null) || FLATPAK_LOG=""
+FLATPAK_PID=""
+flatpak_batch() {
+    run_once flatpak-stremio  flatpak_install com.stremio.Stremio || true
+    run_once flatpak-whatsie  flatpak_install com.ktechpit.whatsie \
+        || warn "Whatsie (Flatpak) failed - retry later: flatpak install flathub com.ktechpit.whatsie"
+    run_once flatpak-heroic   flatpak_install com.heroicgameslauncher.hgl \
+        || warn "Heroic (Flatpak) failed - retry later: flatpak install flathub com.heroicgameslauncher.hgl"
+    run_once flatpak-protonup flatpak_install net.davidotek.pupgui2 \
+        || warn "ProtonUp-Qt (Flatpak) failed - retry later: flatpak install flathub net.davidotek.pupgui2"
+}
+# Background only while passwordless sudo is active: a background job has no
+# terminal, so on a resumed run (rule already removed) sudo could not ask for
+# the password and every install would fail. Then it runs in the foreground.
+if [ -n "$FLATPAK_LOG" ] && sudo -n true 2>/dev/null; then
+    flatpak_batch > "$FLATPAK_LOG" 2>&1 &
+    FLATPAK_PID=$!
+else
+    [ -n "$FLATPAK_LOG" ] && rm -f "$FLATPAK_LOG"
+    flatpak_batch
+fi
+
 # -- AUR packages (only what isn't in the repos or on Flathub) ----------------
-# Heroic and ProtonUp-Qt are installed from Flatpak below instead of AUR -bin
+# Heroic and ProtonUp-Qt are installed from Flatpak above instead of AUR -bin
 # packages: signed, CDN-backed, and no third-party binary build step to break.
 info "Installing AUR packages..."
 run_once aur-dxvk          aur_install dxvk-mingw          || true
@@ -4974,31 +5646,26 @@ if run_once aur-ddterm aur_install gnome-shell-extension-ddterm; then
     dconf write /com/github/amezin/ddterm/ddterm-toggle-hotkey "['F12', '<Control><Alt>t']" 2>/dev/null || true
     dconf write /com/github/amezin/ddterm/window-above true 2>/dev/null || true
     dconf write /com/github/amezin/ddterm/hide-when-focus-lost false 2>/dev/null || true
-    log "ddterm drop-down terminal installed (F12 / Ctrl+Alt+T)"
+    dconf write /com/github/amezin/ddterm/use-system-font false 2>/dev/null || true
+    dconf write /com/github/amezin/ddterm/custom-font "'Hack Nerd Font Bold 12'" 2>/dev/null || true
+    log "ddterm drop-down terminal installed (F12 / Ctrl+Alt+T, Hack Nerd Font Bold)"
 else
     warn "ddterm failed to install from the AUR - drop-down terminal unavailable."
 fi
 log "AUR packages done"
 
+# -- Collect the background Flatpak downloads ---------------------------------
+if [ -n "$FLATPAK_PID" ]; then
+    info "Waiting for the Flatpak downloads to finish..."
+    wait "$FLATPAK_PID" 2>/dev/null || true
+    [ -s "$FLATPAK_LOG" ] && cat "$FLATPAK_LOG"
+    rm -f "$FLATPAK_LOG"
+fi
+log "Flatpak apps installed"
+
 # NVIDIA drivers (modern + legacy 580xx/470xx), Optimus/PRIME, switcheroo-control and
 # nvidia-prime are all handled earlier by CachyOS hardware detection (chwd) - no custom
 # NVIDIA driver logic here anymore.
-
-# -- Flatpak (preferred for Heroic + ProtonUp-Qt: signed, stable, no -bin build)
-info "Installing Flatpak apps..."
-# sudo: a system-wide flatpak install from a user session pops an interactive
-# polkit password dialog, which stalls the unattended first-boot flow.
-sudo flatpak remote-add --if-not-exists flathub \
-    https://dl.flathub.org/repo/flathub.flatpakrepo || warn "Could not add Flathub remote"
-
-flatpak_install() { sudo flatpak install -y --noninteractive flathub "$1"; }
-
-run_once flatpak-stremio  flatpak_install com.stremio.Stremio || true
-run_once flatpak-heroic   flatpak_install com.heroicgameslauncher.hgl \
-    || warn "Heroic (Flatpak) failed - retry later: flatpak install flathub com.heroicgameslauncher.hgl"
-run_once flatpak-protonup flatpak_install net.davidotek.pupgui2 \
-    || warn "ProtonUp-Qt (Flatpak) failed - retry later: flatpak install flathub net.davidotek.pupgui2"
-log "Flatpak apps installed"
 
 # -- Retry packages deferred from the base install --------
 # The ISO installer defers optional apps (Steam/Lutris/fastfetch) here instead of
@@ -5103,7 +5770,9 @@ install_ge_proton() {
     local sum_file="$dir/$(basename "$sum_url")"
 
     # Verify sha512 BEFORE extracting - never unpack an unverified archive into
-    # the Steam runtime. The .sha512sum references the bare tarball filename, so
+    # the Steam runtime. Note: the checksum comes from the same GitHub release,
+    # so it proves the download is intact, not who published it; GE-Proton
+    # publishes no signatures to check against. The .sha512sum references the bare tarball filename, so
     # the check runs from inside the download dir.
     local rc=1
     if curl -fL --retry 5 --retry-delay 3 --retry-connrefused --connect-timeout 15 --max-time 1800 -o "$tar_file" "$tar_url" \
@@ -5182,7 +5851,6 @@ for pair in \
     "org.gnome.Terminal::Terminal" \
     "org.gnome.Console::Console" \
     "org.gnome.Totem::Video" \
-    "vim::Vim" \
     "org.gnome.Weather::Weather" \
     "winetricks::Winetricks" \
     "org.gnome.Tour::Tour"
@@ -5209,9 +5877,9 @@ if ! grep -q "system-db:local" /etc/dconf/profile/user 2>/dev/null; then
 fi
 sudo tee /etc/dconf/db/local.d/00-niixarch-dash > /dev/null << 'DCONFEOF'
 [org/gnome/shell]
-favorite-apps=['org.gnome.Nautilus.desktop', 'helium.desktop', 'net.lutris.Lutris.desktop', 'steam.desktop', 'com.heroicgameslauncher.hgl.desktop', 'com.stremio.Stremio.desktop']
+favorite-apps=['org.gnome.Nautilus.desktop', 'helium.desktop', 'org.gnome.TextEditor.desktop', 'net.lutris.Lutris.desktop', 'steam.desktop', 'com.heroicgameslauncher.hgl.desktop', 'com.ktechpit.whatsie.desktop', 'signal-desktop.desktop', 'com.stremio.Stremio.desktop']
 disable-user-extensions=false
-enabled-extensions=['appindicatorsupport@rgcjonas.gmail.com', 'dash-to-panel@jderose9.github.com', 'arcmenu@arcmenu.com', 'screen-rotate@shyzus.github.io', 'ddterm@amezin.github.com', 'system-monitor@gnome-shell-extensions.gcampax.github.com']
+enabled-extensions=['appindicatorsupport@rgcjonas.gmail.com', 'dash-to-panel@jderose9.github.com', 'arcmenu@arcmenu.com', 'screen-rotate@shyzus.github.io', 'tiling-assistant@leleat-on-github', 'ddterm@amezin.github.com', 'system-monitor@gnome-shell-extensions.gcampax.github.com']
 
 [org/gnome/desktop/interface]
 color-scheme='prefer-dark'
@@ -5222,15 +5890,30 @@ icon-theme='NiiX'
 automount=true
 automount-open=false
 autorun-never=false
+
+[org/gnome/terminal/legacy/profiles:]
+default='b1dcc9dd-5262-4d8d-a863-c897e6d979b9'
+list=['b1dcc9dd-5262-4d8d-a863-c897e6d979b9']
+
+[org/gnome/terminal/legacy/profiles:/:b1dcc9dd-5262-4d8d-a863-c897e6d979b9]
+visible-name='NiiX'
+use-system-font=false
+font='Hack Nerd Font Bold 12'
+audible-bell=false
+scrollback-unlimited=true
 DCONFEOF
 sudo dconf update 2>/dev/null \
-    && log "Dash pinned: Nautilus - Helium - Lutris - Steam - Heroic - Stremio" \
+    && log "Dash pinned: Nautilus - Helium - Text Editor - Lutris - Steam - Heroic - Whatsie - Signal - Stremio" \
     || warn "dconf update failed - Dash pinning may not apply"
 
 # -- Cleanup -----------------------------------------------
+# Order matters: every privileged step runs while passwordless sudo still
+# exists, and removing that rule is the LAST sudo call. Anything after it
+# would stop at a password prompt - the countdown reboot included.
 sudo rm -f /etc/xdg/autostart/niixarch-firstboot.desktop
-sudo rm -f /etc/sudoers.d/niixarch-firstboot   # remove temporary passwordless sudo
 sudo touch /var/lib/niixarch-firstboot-done
+sudo systemctl disable --now niixarch-sudo-expiry.timer >/dev/null 2>&1 || true
+sudo rm -f /etc/sudoers.d/niixarch-firstboot   # remove temporary passwordless sudo
 
 echo ""
 echo -e "  ${GREEN}+${NC}  ${WHITE}${BOLD}First-boot setup complete!${NC}"
@@ -5240,7 +5923,7 @@ echo -e "  ${CYAN}-${NC}  Run any app on the dGPU: ${GREEN}gpu-run <app>${NC}  (
 echo -e "  ${CYAN}-${NC}  Steam one-time: Settings -> Compatibility -> Steam Play for all titles -> ${GREEN}Proton-CachyOS${NC}"
 echo -e "  ${CYAN}-${NC}  FreeSync/G-Sync monitor? Settings -> Displays -> enable ${GREEN}Variable Refresh Rate${NC}"
 echo -e "  ${CYAN}-${NC}  NTFS drives: auto-mounted under ${GREEN}/media${NC}  (${GREEN}niix-ntfs list${NC})"
-echo -e "  ${CYAN}-${NC}  Wi-Fi hotspot: ${GREEN}niix-hotspot start${NC}  - keep it up automatically: ${GREEN}niix-hotspot auto on${NC}"
+echo -e "  ${CYAN}-${NC}  Wi-Fi hotspot: ${GREEN}niix-hotspot start${NC}  (stays on across reboots; off: ${GREEN}niix-hotspot auto off${NC})"
 echo -e "  ${CYAN}-${NC}  Refresh clean snapshot: ${GREEN}sudo niixarch-refresh-clean${NC}"
 echo -e "  ${CYAN}-${NC}  Log saved to: $LOG"
 echo ""
@@ -5251,7 +5934,8 @@ for i in 10 9 8 7 6 5 4 3 2 1; do
     sleep 1
 done
 echo ""
-sudo reboot
+# No sudo needed (and none left): logind lets the active local session reboot.
+systemctl reboot || sudo reboot
 FBEOF
 
     chmod +x /mnt/usr/local/bin/niixarch-firstboot.sh
@@ -5455,6 +6139,8 @@ select_single_drive() {
         [[ "$dpath" == /dev/loop* ]] && continue
         [[ "$dpath" == /dev/ram*  ]] && continue
         [[ "$dpath" == /dev/dm-*  ]] && continue
+        # Only whole physical disks: never zram, md arrays, nbd or optical.
+        [[ "$(lsblk -dno TYPE "$dpath" 2>/dev/null)" == "disk" ]] || continue
         is_removable "$dpath" && continue
         drive_list+=("$line")
     done < <(lsblk -dn -o PATH,SIZE,MODEL 2>/dev/null | tail -n +1)
@@ -5537,7 +6223,7 @@ wipe_single_drive() {
     dd if=/dev/zero of="$SINGLE_DRIVE" bs=1M count=10 conv=fsync         seek=$(( $(blockdev --getsz "$SINGLE_DRIVE") / 2048 - 10 )) 2>/dev/null || true
 
     partprobe "$SINGLE_DRIVE" 2>/dev/null || true
-    sleep 1
+    udevadm settle --timeout=10 2>/dev/null || true
     log "Drive $SINGLE_DRIVE wiped - ready for partitioning"
 }
 
@@ -5563,9 +6249,8 @@ create_singleboot_partitions() {
     parted -s "$SINGLE_DRIVE" mkpart "arch" 513MiB 100% || err "Failed to create root partition"
     log "Root partition: 513 MiB -> 100%  (partition 2)"
 
-    # Inform the kernel and give udev time to create device nodes
-    partprobe "$SINGLE_DRIVE"
-    sleep 3
+    # Inform the kernel; the device nodes are waited for below.
+    partprobe "$SINGLE_DRIVE" 2>/dev/null || true
 
     # Build partition paths - NVMe/MMC use 'p' suffix, SATA/USB do not
     if [[ "$SINGLE_DRIVE" == *nvme* || "$SINGLE_DRIVE" == *mmcblk* ]]; then
@@ -5576,7 +6261,13 @@ create_singleboot_partitions() {
         LUKS_PART="${SINGLE_DRIVE}2"
     fi
 
-    # Verify device nodes exist before continuing
+    # Wait for udev to publish both nodes (up to ~10s), then verify.
+    local _try
+    for _try in $(seq 1 20); do
+        [[ -b "$EFI_PART" && -b "$LUKS_PART" ]] && break
+        udevadm settle --timeout=5 2>/dev/null || true
+        sleep 0.5
+    done
     [[ -b "$EFI_PART"  ]] || err "EFI partition $EFI_PART not found after partprobe"
     [[ -b "$LUKS_PART" ]] || err "Root partition $LUKS_PART not found after partprobe"
 
