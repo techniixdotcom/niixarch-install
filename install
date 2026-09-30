@@ -71,7 +71,7 @@ LOCALE="en_GB.UTF-8"
 MIRROR_COUNTRY="Switzerland"
 MAPPER="cryptroot"
 BTRFS_OPTS="noatime,compress=zstd,space_cache=v2"
-NIIX_BUILD="2026-09-19-r21"  # bump on every change - printed on the banner to verify freshness
+NIIX_BUILD="2026-09-30-r25"  # bump on every change - printed on the banner to verify freshness
 
 # -- Install mode ---------------------------------------------
 INSTALL_MODE=""    # "dualboot" | "singleboot"
@@ -1105,11 +1105,14 @@ gather_input() {
     echo -e "  ${DIM}Disabling gives ~5-10% more FPS but reduces side-channel protection.${NC}"
     echo -e "  ${GREEN}[1]${NC}  ${WHITE}OFF${NC}  - Max performance  (mitigations=off)"
     echo -e "  ${GREEN}[2]${NC}  ${WHITE}ON${NC}   - Keep protections  (safer for banking/crypto)"
-    read -rp "  Choose [1/2]: " MIT_CHOICE
-    case "$MIT_CHOICE" in
-        2) USE_MITIGATIONS=true;  log "Mitigations: ON" ;;
-        *) USE_MITIGATIONS=false; log "Mitigations: OFF" ;;
-    esac
+    while true; do
+        read -rp "  Choose [1/2]: " MIT_CHOICE
+        case "$MIT_CHOICE" in
+            1) USE_MITIGATIONS=false; log "Mitigations: OFF"; break ;;
+            2) USE_MITIGATIONS=true;  log "Mitigations: ON";  break ;;
+            *) warn "Please type 1 or 2 - there is no silent default for a security setting." ;;
+        esac
+    done
 }
 
 # -- Step 4: Confirm ------------------------------------------
@@ -1145,6 +1148,14 @@ confirm() {
     printf "  ${CYAN}-${NC}  %-22s ${WHITE}%s${NC}\n" "Username:"      "$USERNAME"
     printf "  ${CYAN}-${NC}  %-22s ${WHITE}%s${NC}\n" "Desktop:"       "GNOME"
     printf "  ${CYAN}-${NC}  %-22s ${WHITE}%s${NC}\n" "Mitigations:"   "$([ "$USE_MITIGATIONS" = true ] && echo ON || echo OFF)"
+    echo
+    echo -e "  ${PINK}-- Security trade-offs you are accepting -------${NC}"
+    printf "  ${YELLOW}!${NC}  %-22s ${WHITE}%s${NC}\n" "Auto-login:" "ON - after the LUKS passphrase, the desktop opens as"
+    printf "  ${YELLOW} ${NC}  %-22s ${WHITE}%s${NC}\n" "" "'$USERNAME' (sudo-capable) with no second password"
+    if [[ "$USE_MITIGATIONS" == false ]]; then
+        printf "  ${YELLOW}!${NC}  %-22s ${WHITE}%s${NC}\n" "CPU mitigations:" "OFF - side-channel protections disabled for FPS"
+    fi
+    printf "  ${CYAN}-${NC}  %-22s ${WHITE}%s${NC}\n" "Hotspot routing:" "only while the hotspot runs (NetworkManager-managed)"
     echo
     if [[ "$INSTALL_MODE" == "dualboot" ]]; then
         warn "Only the selected free space will be touched - Windows is safe."
@@ -1263,11 +1274,32 @@ clean_efi() {
     info "(Windows and EFI/Microsoft files will NOT be touched)"
 
     # -- 1. Clean files from EFI partition --------------------
-    # Kernels and initramfs (stock + cachyos) - unambiguously ours: only an
-    # Arch/Limine-style install (kernel files at ESP root, not a separate
-    # /boot) uses this naming here, so no confirmation needed.
-    rm -f /mnt/boot/vmlinuz-linux*
-    rm -f /mnt/boot/initramfs-linux*.img
+    # Kernels and initramfs (stock + cachyos) at the ESP root. A previous NiiX
+    # install is recognised by its Limine branding and cleaned silently. Any
+    # other Arch-family install that keeps its kernels at the ESP root (e.g.
+    # another Limine-based distro in a triple-boot) would lose them - and this
+    # install writes the same filenames anyway - so that case needs consent.
+    local stale_kernels=() f
+    for f in /mnt/boot/vmlinuz-linux* /mnt/boot/initramfs-linux*.img; do
+        [ -e "$f" ] && stale_kernels+=("$f")
+    done
+    if [ "${#stale_kernels[@]}" -gt 0 ]; then
+        if grep -qs 'NiiX Arch' /mnt/boot/limine.conf /mnt/boot/limine.cfg \
+                /mnt/boot/limine/limine.conf /mnt/boot/limine/limine.cfg \
+                /mnt/boot/EFI/limine/limine.conf /mnt/boot/EFI/limine/limine.cfg \
+                /mnt/boot/EFI/BOOT/limine.conf /mnt/boot/EFI/BOOT/limine.cfg; then
+            info "Removing kernels left by a previous NiiX install..."
+        else
+            warn "Found Linux kernel files on this EFI partition that do NOT belong to a previous NiiX install:"
+            for f in "${stale_kernels[@]}"; do echo "    $f"; done
+            warn "If another Linux install boots from these, it will stop booting (NiiX uses the same filenames)."
+            ask "Delete them and continue? [y/N]:"
+            read -rp "  > " DELETE_FOREIGN_KERNELS
+            [[ "$DELETE_FOREIGN_KERNELS" =~ ^[Yy]$ ]] \
+                || err "Aborted at your request - the other install's kernel files were left untouched."
+        fi
+        rm -f "${stale_kernels[@]}"
+    fi
 
     # Limine configs + EFI binary - also unambiguously ours, only Limine uses
     # these exact paths.
@@ -1337,7 +1369,8 @@ install_base() {
         base base-devel linux linux-firmware \
         networkmanager wpa_supplicant iw efibootmgr \
         sudo nano vim git wget curl python \
-        ntfs-3g dosfstools \
+        ntfs-3g ntfsprogs exfatprogs dosfstools mtools \
+        udisks2 gvfs \
         btrfs-progs cryptsetup \
         limine \
         pipewire pipewire-alsa pipewire-pulse wireplumber \
@@ -1431,9 +1464,10 @@ install_gpu_drivers() {
     pac_install_retry "${base_pkgs[@]}" \
         || warn "Some Mesa/Vulkan packages failed to install even after retries."
 
-    # Firefox VAAPI hint + shader cache - harmless, vendor-agnostic.
+    # Shader cache - harmless, vendor-agnostic. (No MOZ_DISABLE_RDD_SANDBOX:
+    # current Firefox does VAAPI inside the sandboxed RDD process, so disabling
+    # that sandbox system-wide only weakens security.)
     cat >> /mnt/etc/environment <<'COMMONENV'
-MOZ_DISABLE_RDD_SANDBOX=1
 __GL_SHADER_DISK_CACHE=1
 __GL_SHADER_DISK_CACHE_SKIP_CLEANUP=1
 COMMONENV
@@ -1567,7 +1601,6 @@ install_packages() {
         flatpak \
         dnsmasq \
         snapper snap-pac \
-        gnome-terminal \
         vlc \
         xorg-server \
         xorg-xwayland \
@@ -1631,12 +1664,13 @@ install_packages() {
 configure_system() {
     hr "System Configuration"
     log "Generating fstab..."
-    genfstab -U /mnt >> /mnt/etc/fstab
+    genfstab -U /mnt >> /mnt/etc/fstab || err "genfstab failed"
+    grep -qE '^[^#].*[[:space:]]/[[:space:]]+btrfs' /mnt/etc/fstab \
+        || err "fstab has no btrfs root entry - check the log"
 
-    # Add /tmp as tmpfs to fstab
-    if ! grep -q "^tmpfs.*/tmp" /mnt/etc/fstab; then
-        echo "tmpfs /tmp tmpfs defaults,noatime,nosuid,nodev,size=4G 0 0" >> /mnt/etc/fstab
-    fi
+    # /tmp: no fstab entry on purpose. systemd's tmp.mount already makes /tmp a
+    # tmpfs (nosuid,nodev, sized at 50% of RAM). A fixed size cap here would
+    # override that and break large builds/extractions on high-RAM machines.
 
     # (mkinitcpio.conf written and rebuilt by rebuild_initramfs after all packages)
 
@@ -1661,10 +1695,11 @@ kernel.split_lock_mitigate=0
 fs.inotify.max_user_watches=524288
 net.core.default_qdisc=fq
 net.ipv4.tcp_congestion_control=bbr
-net.ipv4.ip_forward=1
-net.ipv6.conf.all.forwarding=1
 SYSEOF
-    log "Sysctl tuned (ZRAM-aware swap: swappiness=$swappiness + page-cluster=0; max_map_count + split-lock + IP-forward for gaming/hotspot)"
+    # No global ip_forward: NetworkManager switches IPv4 forwarding on itself
+    # while a shared (hotspot) connection is up. Global IPv6 forwarding would
+    # also make the kernel ignore router advertisements on every interface.
+    log "Sysctl tuned (ZRAM-aware swap: swappiness=$swappiness + page-cluster=0; max_map_count + split-lock for gaming)"
 
     # -- Transparent hugepages --------------------------------
     mkdir -p /mnt/etc/tmpfiles.d
@@ -1698,11 +1733,15 @@ ZRAMEOF
     # NetworkManager connection-sharing (hotspot) hands out 10.42.0.0/24 and
     # runs its own per-interface dnsmasq. ufw's default "deny incoming" blocks
     # the phone's DHCP (67/udp) + DNS (53) requests, and the default DROP
-    # forward policy breaks NAT - so the phone connects but never gets an IP.
-    # These rules fix exactly that.
+    # forward policy blocks its traffic - so the phone connects but gets no IP
+    # or no internet. The rules below open exactly that: DHCP/DNS from the
+    # hotspot subnet, and forwarding ONLY for traffic originating from it
+    # (replies are already allowed by ufw's conntrack rules). The global
+    # forward policy stays DROP.
     arch-chroot /mnt bash <<'FWEOF'
 ufw default deny incoming 2>/dev/null || true
 ufw default allow outgoing 2>/dev/null || true
+ufw default deny routed 2>/dev/null || true
 # Steam (in-home streaming / remote play)
 ufw allow 27036:27037/tcp 2>/dev/null || true
 ufw allow 27031:27036/udp 2>/dev/null || true
@@ -1710,20 +1749,13 @@ ufw allow 27031:27036/udp 2>/dev/null || true
 ufw allow in proto udp from 10.42.0.0/24 to any port 67 2>/dev/null || true
 ufw allow in proto udp from 10.42.0.0/24 to any port 53 2>/dev/null || true
 ufw allow in proto tcp from 10.42.0.0/24 to any port 53 2>/dev/null || true
+ufw route allow from 10.42.0.0/24 2>/dev/null || true
 # Don't run 'ufw --force enable' in chroot - no iptables modules
 # ufw will start on boot via systemctl enable ufw
 FWEOF
 
-    # Hotspot NAT: ufw forwards must be ACCEPT or masquerading silently drops.
-    if [[ -f /mnt/etc/default/ufw ]]; then
-        sed -i 's/^DEFAULT_FORWARD_POLICY=.*/DEFAULT_FORWARD_POLICY="ACCEPT"/' \
-            /mnt/etc/default/ufw
-    fi
-    # IPv4 forwarding for ufw's own sysctl (matches 99-niixarch.conf)
-    if [[ -f /mnt/etc/ufw/sysctl.conf ]]; then
-        sed -i 's@^#*net/ipv4/ip_forward=.*@net/ipv4/ip_forward=1@' \
-            /mnt/etc/ufw/sysctl.conf
-    fi
+    grep -qs '10.42.0.0/24' /mnt/etc/ufw/user.rules \
+        || warn "ufw hotspot rules were not written - the hotspot may not hand out addresses"
 
     # -- niix-hotspot helper - phone-friendly 2.4GHz WPA2 hotspot ---------
     # Defaults to 2.4GHz / channel 7 / WPA2-AES only. This is the combination
@@ -1731,28 +1763,85 @@ FWEOF
     # is rejected by older phones, and TKIP is rejected by newer ones.
     cat > /mnt/usr/local/bin/niix-hotspot <<'HSEOF'
 #!/bin/bash
-# niix-hotspot - start/stop a phone-friendly Wi-Fi hotspot
-#   niix-hotspot start [SSID] [PASSWORD]   (PASSWORD must be >= 8 chars)
-#   niix-hotspot stop
+# niix-hotspot - phone-friendly 2.4GHz WPA2 Wi-Fi hotspot (NetworkManager)
+#   niix-hotspot start [SSID] [PASSWORD]  create/update the hotspot and bring it up
+#   niix-hotspot setup SSID [PASSWORD]    create/update it without bringing it up
+#   niix-hotspot up                       bring the saved hotspot up
+#   niix-hotspot stop                     take it down (auto mode paused until reboot)
+#   niix-hotspot auto on|off              keep it up automatically (from boot, and
+#                                         restored after internet outages)
+#   niix-hotspot password                 show the saved password
 #   niix-hotspot status
+# PASSWORD: 8-63 characters; omit it to get a random one. It is stored only in
+# NetworkManager's root-only profile. Defaults: 2.4GHz, channel 7, WPA2-AES
+# only - the combination phones connect to most reliably.
+# Exit codes: 0 ok, 1 error, 2 refused (Wi-Fi is the only internet connection),
+#             3 no saved hotspot
 set -uo pipefail
 CON="niix-hotspot"
+SVC="niix-hotspot-watchdog.service"
 ACTION="${1:-}"
-SSID="${2:-NiiX-Arch}"
-PASS="${3:-niixarch1234}"
 
-WIFI_DEV=$(nmcli -t -f DEVICE,TYPE device 2>/dev/null | awk -F: '$2=="wifi"{print $1; exit}')
+usage() {
+    echo "Usage: niix-hotspot {start [SSID] [PASSWORD]|setup SSID [PASSWORD]|up|stop|auto on|off|password|status}"
+}
 
-usage(){ echo "Usage: niix-hotspot {start|stop|status} [SSID] [PASSWORD]"; }
+run_root() {
+    if [ "$(id -u)" -eq 0 ]; then "$@"; else sudo "$@"; fi
+}
 
-case "$ACTION" in
-  start)
-    [ -n "$WIFI_DEV" ] || { echo "No Wi-Fi device found."; exit 1; }
-    if [ "${#PASS}" -lt 8 ]; then echo "Password must be at least 8 characters."; exit 1; fi
+wifi_dev() {
+    nmcli -t -f DEVICE,TYPE device 2>/dev/null | awk -F: '$2=="wifi"{print $1; exit}'
+}
+
+have_profile() {
+    nmcli connection show "$CON" >/dev/null 2>&1
+}
+
+hotspot_active() {
+    [ "$(nmcli -g GENERAL.STATE connection show "$CON" 2>/dev/null)" = "activated" ]
+}
+
+random_pass() {
+    local p
+    p=$(tr -dc 'A-Za-z0-9' < /dev/urandom 2>/dev/null | head -c 16) || true
+    printf '%s' "$p"
+}
+
+# One Wi-Fi card cannot be a client and an access point at the same time. If
+# Wi-Fi is the ONLY internet connection, turning it into a hotspot would cut
+# this machine off and leave nothing to share - refuse unless another uplink
+# (Ethernet, USB tethering, mobile modem) is up. NIIX_HOTSPOT_FORCE=1 overrides.
+uplink_ok() {
+    local dev="$1" state conn other
+    [ "${NIIX_HOTSPOT_FORCE:-0}" = "1" ] && return 0
+    state=$(nmcli -t -f DEVICE,STATE device 2>/dev/null | awk -F: -v d="$dev" '$1==d{print $2; exit}')
+    conn=$(nmcli -g GENERAL.CONNECTION device show "$dev" 2>/dev/null)
+    [ "$state" = "connected" ] && [ "$conn" != "$CON" ] || return 0
+    other=$(nmcli -t -f DEVICE,TYPE,STATE device 2>/dev/null | awk -F: -v d="$dev" \
+        '$1!=d && $3=="connected" && $2!~/^(wifi|wifi-p2p|loopback|tun|wireguard|dummy|bridge)$/ {print $1; exit}')
+    [ -n "$other" ] && return 0
+    echo "Wi-Fi $dev is your internet connection ('$conn')."
+    echo "A hotspot on the same Wi-Fi card would disconnect you and share nothing."
+    echo "Connect Ethernet or USB tethering first - or force it: NIIX_HOTSPOT_FORCE=1 niix-hotspot up"
+    return 1
+}
+
+create_profile() {
+    local ssid="$1" pass="$2" dev
+    dev=$(wifi_dev)
+    [ -n "$dev" ] || { echo "No Wi-Fi device found."; return 1; }
+    local ssid_bytes
+    ssid_bytes=$(printf '%s' "$ssid" | wc -c)
+    if [ "$ssid_bytes" -lt 1 ] || [ "$ssid_bytes" -gt 32 ]; then
+        echo "SSID must be 1-32 bytes."; return 1
+    fi
+    if [ "${#pass}" -lt 8 ] || [ "${#pass}" -gt 63 ]; then
+        echo "Password must be 8-63 characters."; return 1
+    fi
     nmcli connection delete "$CON" >/dev/null 2>&1 || true
-    nmcli connection add type wifi ifname "$WIFI_DEV" con-name "$CON" \
-        autoconnect no ssid "$SSID" >/dev/null
-    nmcli connection modify "$CON" \
+    nmcli connection add type wifi ifname "$dev" con-name "$CON" \
+        autoconnect no ssid "$ssid" \
         802-11-wireless.mode ap \
         802-11-wireless.band bg \
         802-11-wireless.channel 7 \
@@ -1764,28 +1853,290 @@ case "$ACTION" in
         wifi-sec.pairwise ccmp \
         wifi-sec.group ccmp \
         wifi-sec.pmf optional \
-        wifi-sec.psk "$PASS"
-    if nmcli connection up "$CON"; then
-        echo "Hotspot '$SSID' is UP on $WIFI_DEV  (2.4GHz, WPA2-AES)."
-        echo "Password: $PASS"
-    else
-        echo "Failed to start hotspot. Check: nmcli -f WIFI-PROPERTIES.AP device show $WIFI_DEV"
-        exit 1
+        wifi-sec.psk "$pass" >/dev/null \
+        || { echo "Could not create the hotspot profile."; return 1; }
+}
+
+bring_up() {
+    local dev bound ssid
+    have_profile || { echo "No saved hotspot - run: niix-hotspot start [SSID] [PASSWORD]"; return 3; }
+    dev=$(wifi_dev)
+    [ -n "$dev" ] || { echo "No Wi-Fi device found."; return 1; }
+    # Keep the profile bound to the current Wi-Fi card (names can change,
+    # e.g. a different USB adapter).
+    bound=$(nmcli -g connection.interface-name connection show "$CON" 2>/dev/null)
+    if [ "$bound" != "$dev" ]; then
+        nmcli connection modify "$CON" connection.interface-name "$dev" >/dev/null 2>&1 || true
     fi
-    ;;
-  stop)
-    nmcli connection down "$CON" >/dev/null 2>&1 || true
-    echo "Hotspot stopped."
-    ;;
-  status)
-    nmcli -f GENERAL.STATE connection show "$CON" 2>/dev/null \
-        || echo "Hotspot is not active. Start it with: niix-hotspot start"
-    ;;
-  *) usage; exit 1 ;;
+    uplink_ok "$dev" || return 2
+    if ! nmcli connection up "$CON" >/dev/null 2>&1; then
+        echo "Failed to start hotspot. Check: nmcli -f WIFI-PROPERTIES.AP device show $dev"
+        return 1
+    fi
+    ssid=$(nmcli -g 802-11-wireless.ssid connection show "$CON" 2>/dev/null)
+    echo "Hotspot '$ssid' is UP on $dev (2.4GHz, WPA2-AES)."
+    return 0
+}
+
+# setup/start argument handling: SSID defaults to NiiX-Arch; a missing
+# password is generated randomly and printed once.
+prepare_profile() {
+    local ssid="${1:-NiiX-Arch}" pass="${2:-}" generated=false
+    if [ -z "$pass" ]; then
+        pass=$(random_pass)
+        generated=true
+    fi
+    create_profile "$ssid" "$pass" || return 1
+    echo "Hotspot saved: SSID '$ssid'"
+    if [ "$generated" = true ]; then
+        echo "Generated password: $pass  (show it again any time: niix-hotspot password)"
+    fi
+    return 0
+}
+
+case "$ACTION" in
+    start)
+        if [ $# -ge 2 ] || ! have_profile; then
+            prepare_profile "${2:-}" "${3:-}" || exit 1
+        fi
+        bring_up; rc=$?
+        # Resume auto mode if it is enabled but was paused by 'stop'.
+        if [ "$rc" -eq 0 ] && systemctl is-enabled --quiet "$SVC" 2>/dev/null \
+            && ! systemctl is-active --quiet "$SVC" 2>/dev/null; then
+            systemctl start "$SVC" >/dev/null 2>&1 || true
+        fi
+        exit "$rc"
+        ;;
+    setup)
+        [ $# -ge 2 ] || { usage; exit 1; }
+        prepare_profile "$2" "${3:-}" || exit 1
+        ;;
+    up)
+        bring_up; exit $?
+        ;;
+    stop)
+        if systemctl is-active --quiet "$SVC" 2>/dev/null; then
+            if systemctl stop "$SVC" >/dev/null 2>&1; then
+                echo "Auto mode paused until the next boot ('niix-hotspot start' resumes it, 'niix-hotspot auto off' disables it)."
+            else
+                echo "Could not pause auto mode - it will bring the hotspot back. Try: sudo niix-hotspot stop"
+            fi
+        fi
+        nmcli connection down "$CON" >/dev/null 2>&1 || true
+        echo "Hotspot stopped."
+        ;;
+    auto)
+        case "${2:-}" in
+            on)
+                have_profile || { echo "Set up the hotspot first: niix-hotspot setup SSID [PASSWORD]"; exit 3; }
+                run_root systemctl enable --now "$SVC" \
+                    && echo "Auto hotspot ON: kept up from boot and restored after internet outages." ;;
+            off)
+                run_root systemctl disable --now "$SVC" \
+                    && echo "Auto hotspot OFF." ;;
+            *)
+                auto_state=$(systemctl is-enabled "$SVC" 2>/dev/null) || true
+                echo "Auto hotspot: ${auto_state:-unknown}"
+                echo "Usage: niix-hotspot auto on|off" ;;
+        esac
+        ;;
+    password)
+        have_profile || { echo "No saved hotspot."; exit 3; }
+        nmcli -s -g 802-11-wireless-security.psk connection show "$CON" 2>/dev/null \
+            || { echo "Could not read the password (try: sudo niix-hotspot password)"; exit 1; }
+        ;;
+    status)
+        if hotspot_active; then
+            echo "Hotspot: UP ('$(nmcli -g 802-11-wireless.ssid connection show "$CON" 2>/dev/null)')"
+        elif have_profile; then
+            echo "Hotspot: down (saved as '$(nmcli -g 802-11-wireless.ssid connection show "$CON" 2>/dev/null)')"
+        else
+            echo "Hotspot: not set up - run: niix-hotspot start [SSID] [PASSWORD]"
+        fi
+        auto_state=$(systemctl is-enabled "$SVC" 2>/dev/null) || true
+        run_state=$(systemctl is-active "$SVC" 2>/dev/null) || true
+        echo "Auto mode: ${auto_state:-unknown} (${run_state:-unknown})"
+        ;;
+    *) usage; exit 1 ;;
 esac
 HSEOF
-    chmod +x /mnt/usr/local/bin/niix-hotspot
-    log "niix-hotspot helper installed (run: niix-hotspot start)"
+    chmod 755 /mnt/usr/local/bin/niix-hotspot
+
+    # -- Hotspot keeper (auto mode) --------------------------------------
+    # A root system service owns the logic: internet checked every 120s
+    # (every 5s while offline) against two independent endpoints; hotspot
+    # checked every 15s and restored once the internet is back. A
+    # NetworkManager dispatcher hook wakes it instantly on network events.
+    # Runs from boot (no login needed). Disabled until the user opts in
+    # (first-boot prompt, or: niix-hotspot auto on).
+    cat > /mnt/usr/local/bin/niix-hotspot-watchdog <<'HSWEOF'
+#!/bin/bash
+# niix-hotspot-watchdog - keeps the NiiX Wi-Fi hotspot up (system service, root).
+#   Internet: HTTP checks of two independent endpoints - online if EITHER
+#             answers correctly (a captive portal fails both). Every 120s
+#             while online, every 5s while offline.
+#   Hotspot:  checked every 15s, and immediately on NetworkManager events
+#             (the dispatcher hook sends SIGUSR1). When it is found down the
+#             internet is re-checked on the spot; if online, 'niix-hotspot up'
+#             brings it back - which itself
+#             refuses to take over Wi-Fi when Wi-Fi is the only internet.
+#   While offline the hotspot is left as it is, so phones stay associated.
+# Logs: journalctl -u niix-hotspot-watchdog -f
+set -u
+
+ONLINE_INTERVAL=120
+OFFLINE_INTERVAL=5
+HOTSPOT_INTERVAL=15
+
+probe_gnome() {
+    local body
+    body=$(curl -fsS --connect-timeout 3 --max-time 5 \
+        http://nmcheck.gnome.org/check_network_status.txt 2>/dev/null) || return 1
+    [ "$body" = "NetworkManager is online" ]
+}
+
+probe_google() {
+    local code
+    code=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 5 \
+        http://www.gstatic.com/generate_204 2>/dev/null) || return 1
+    [ "$code" = "204" ]
+}
+
+internet_ok() {
+    probe_gnome || probe_google
+}
+
+hotspot_active() {
+    [ "$(nmcli -g GENERAL.STATE connection show niix-hotspot 2>/dev/null)" = "activated" ]
+}
+
+WAKE=0
+SLEEP_PID=""
+trap 'WAKE=1' USR1
+trap '[ -n "$SLEEP_PID" ] && kill "$SLEEP_PID" 2>/dev/null; exit 0' TERM INT
+
+# Interruptible sleep: SIGUSR1 (a NetworkManager event) ends it early.
+nap() {
+    sleep "$1" &
+    SLEEP_PID=$!
+    wait "$SLEEP_PID" 2>/dev/null
+    kill "$SLEEP_PID" 2>/dev/null
+    wait "$SLEEP_PID" 2>/dev/null
+    SLEEP_PID=""
+}
+
+online=unknown
+next_probe=0
+last_probe=-1000
+last_rc=""
+echo "started: internet check every ${ONLINE_INTERVAL}s (every ${OFFLINE_INTERVAL}s while offline), hotspot every ${HOTSPOT_INTERVAL}s"
+
+while true; do
+    if [ "$WAKE" -eq 1 ]; then
+        WAKE=0
+        next_probe=0
+    fi
+
+    now=$(date +%s)
+    hotspot_up=true
+    hotspot_active || hotspot_up=false
+
+    # Probe when due - and also right away whenever the hotspot is found down,
+    # so the decision to bring it back never rests on a stale "online".
+    if [ "$now" -ge "$next_probe" ] \
+        || { [ "$hotspot_up" = false ] && [ $(( now - last_probe )) -ge "$OFFLINE_INTERVAL" ]; }; then
+        last_probe=$now
+        if internet_ok; then
+            [ "$online" != true ] && echo "internet: online"
+            online=true
+            next_probe=$(( $(date +%s) + ONLINE_INTERVAL ))
+        else
+            [ "$online" != false ] && echo "internet: OFFLINE - re-checking every ${OFFLINE_INTERVAL}s"
+            online=false
+            next_probe=$(( $(date +%s) + OFFLINE_INTERVAL ))
+        fi
+    fi
+
+    if [ "$online" = true ] && [ "$hotspot_up" = false ]; then
+        niix-hotspot up >/dev/null 2>&1
+        rc=$?
+        if [ "$rc" -eq 0 ]; then
+            echo "hotspot: brought up"
+            last_rc=""
+        elif [ "$rc" != "$last_rc" ]; then
+            case "$rc" in
+                2) echo "hotspot: waiting - Wi-Fi is the only internet connection (connect Ethernet or USB tethering)" ;;
+                3) echo "hotspot: no saved hotspot - run 'niix-hotspot start' once" ;;
+                *) echo "hotspot: failed to come up (rc=$rc) - retrying every ${HOTSPOT_INTERVAL}s" ;;
+            esac
+            last_rc="$rc"
+        fi
+    fi
+
+    wait_s=$(( next_probe - $(date +%s) ))
+    [ "$wait_s" -gt "$HOTSPOT_INTERVAL" ] && wait_s=$HOTSPOT_INTERVAL
+    [ "$wait_s" -lt 1 ] && wait_s=1
+    [ "$WAKE" -eq 1 ] || nap "$wait_s"
+done
+HSWEOF
+    chmod 755 /mnt/usr/local/bin/niix-hotspot-watchdog
+
+    cat > /mnt/etc/systemd/system/niix-hotspot-watchdog.service <<'HSUNITEOF'
+[Unit]
+Description=NiiX Wi-Fi hotspot keeper (kept up from boot, restored after internet outages)
+Wants=NetworkManager.service
+After=NetworkManager.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/niix-hotspot-watchdog
+Restart=always
+RestartSec=10
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
+HSUNITEOF
+
+    # NetworkManager only runs dispatcher scripts that are root-owned,
+    # executable and not writable by group/others.
+    mkdir -p /mnt/etc/NetworkManager/dispatcher.d
+    cat > /mnt/etc/NetworkManager/dispatcher.d/90-niix-hotspot <<'HSDISPEOF'
+#!/bin/sh
+# Wake the hotspot keeper immediately on network changes instead of waiting
+# for its next scheduled check. No-op when auto mode is off.
+case "$2" in
+    up|down|connectivity-change)
+        systemctl kill --kill-whom=main --signal=USR1 niix-hotspot-watchdog.service >/dev/null 2>&1 || true
+        ;;
+esac
+exit 0
+HSDISPEOF
+    chown root:root /mnt/etc/NetworkManager/dispatcher.d/90-niix-hotspot
+    chmod 755 /mnt/etc/NetworkManager/dispatcher.d/90-niix-hotspot
+
+    # 'niix-hotspot stop' pauses auto mode and 'start' resumes it: let the
+    # active local wheel user start/stop/restart THIS one unit without a
+    # password prompt (enable/disable still needs sudo).
+    mkdir -p /mnt/etc/polkit-1/rules.d
+    cat > /mnt/etc/polkit-1/rules.d/92-niix-hotspot.rules <<'HSPOLEOF'
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        action.lookup("unit") == "niix-hotspot-watchdog.service" &&
+        (action.lookup("verb") == "start" ||
+         action.lookup("verb") == "stop" ||
+         action.lookup("verb") == "restart") &&
+        subject.local == true && subject.active == true &&
+        subject.isInGroup("wheel")) {
+        return polkit.Result.YES;
+    }
+});
+HSPOLEOF
+    log "niix-hotspot installed (run: niix-hotspot start; auto mode: niix-hotspot auto on)"
 
     # -- NetworkManager configuration ------------------------
     mkdir -p /mnt/etc/NetworkManager/conf.d
@@ -2016,25 +2367,31 @@ polkit.addRule(function(action, subject) {
 POLEOF
 
     # -- Configure + enable services in chroot ----------------
+    # Quoted heredoc: nothing in the body is expanded by THIS shell, so a '$' or
+    # backtick added later can never be evaluated at the wrong layer. Values are
+    # passed in explicitly through the environment instead.
     log "Configuring system in chroot..."
-    arch-chroot /mnt bash <<CHROOT
+    arch-chroot /mnt env \
+        NX_TIMEZONE="$TIMEZONE" NX_LOCALE="$LOCALE" \
+        NX_KEYMAP="$KEYMAP" NX_HOSTNAME="$HOSTNAME" \
+        bash <<'CHROOT'
 set -e
 
-ln -sf /usr/share/zoneinfo/${TIMEZONE} /etc/localtime
+ln -sf "/usr/share/zoneinfo/${NX_TIMEZONE}" /etc/localtime
 hwclock --systohc
 
-echo "${LOCALE} UTF-8" >> /etc/locale.gen
-echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen
+grep -qxF "${NX_LOCALE} UTF-8" /etc/locale.gen || echo "${NX_LOCALE} UTF-8" >> /etc/locale.gen
+grep -qxF "en_US.UTF-8 UTF-8" /etc/locale.gen || echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen
 locale-gen
-echo "LANG=${LOCALE}" > /etc/locale.conf
+echo "LANG=${NX_LOCALE}" > /etc/locale.conf
 
-echo "KEYMAP=${KEYMAP}" > /etc/vconsole.conf
+echo "KEYMAP=${NX_KEYMAP}" > /etc/vconsole.conf
 
-echo "${HOSTNAME}" > /etc/hostname
+echo "${NX_HOSTNAME}" > /etc/hostname
 cat > /etc/hosts <<EOF
 127.0.0.1   localhost
 ::1         localhost
-127.0.1.1   ${HOSTNAME}.localdomain ${HOSTNAME}
+127.0.1.1   ${NX_HOSTNAME}.localdomain ${NX_HOSTNAME}
 EOF
 
 # Grant the wheel group sudo via a drop-in (safer than editing /etc/sudoers in
@@ -2085,6 +2442,8 @@ systemctl enable niixarch-update.timer 2>/dev/null || true
 systemctl enable bluetooth             2>/dev/null || true
 systemctl enable iio-sensor-proxy      2>/dev/null || true
 systemctl enable fstrim.timer          2>/dev/null || true
+# Runs /etc/NetworkManager/dispatcher.d hooks (wakes the hotspot keeper on network events)
+systemctl enable NetworkManager-dispatcher.service 2>/dev/null || true
 systemctl disable NetworkManager-wait-online.service 2>/dev/null || true
 # Mask the standalone dnsmasq service: NetworkManager runs its OWN per-interface
 # dnsmasq for the hotspot. A system-wide dnsmasq on port 53 would conflict and
@@ -2126,21 +2485,26 @@ systemctl enable snapper-cleanup.timer 2>/dev/null || true
 # Create the initial clean-install snapshot (pre-firstboot baseline)
 snapper --no-dbus -c root create --description "NiiX Arch - clean install" 2>/dev/null || true
 CHROOT
+    local chroot_rc=$?
+    [[ "$chroot_rc" -eq 0 ]] \
+        || err "chroot system configuration failed (exit $chroot_rc) - check the log"
 
-    # Hard verification: the chroot heredoc runs with set -e, but the outer
-    # script does not, so a silent failure there would otherwise go unnoticed.
-    # A system without NetworkManager enabled has no network after first boot.
+    # Hard verification of the one thing a silent failure would hide longest:
+    # a system without NetworkManager enabled has no network after first boot.
     [[ -L /mnt/etc/systemd/system/multi-user.target.wants/NetworkManager.service ]] \
         || err "chroot configuration failed - NetworkManager was not enabled. Check the log."
 
     log "LUKS UUID: $LUKS_UUID"
 
-    # Set passwords and create user
+    # Set passwords and create user (passwords only ever travel over stdin)
     log "Setting passwords..."
-    printf '%s\n' "root:${USER_PASS}" | arch-chroot /mnt chpasswd
+    printf '%s\n' "root:${USER_PASS}" | arch-chroot /mnt chpasswd \
+        || err "Could not set the root password"
     arch-chroot /mnt useradd -m -G wheel,audio,video,storage,optical \
-        -s /bin/bash "${USERNAME}"
-    printf '%s\n' "${USERNAME}:${USER_PASS}" | arch-chroot /mnt chpasswd
+        -s /bin/bash "${USERNAME}" \
+        || err "Could not create user '${USERNAME}'"
+    printf '%s\n' "${USERNAME}:${USER_PASS}" | arch-chroot /mnt chpasswd \
+        || err "Could not set the password for '${USERNAME}'"
 
     log "System configured"
 }
@@ -2484,6 +2848,7 @@ install_desktop() {
         gnome-shell-extensions \
         gnome-menus \
         gnome-disk-utility \
+        gvfs-mtp gvfs-gphoto2 gvfs-afc gvfs-smb \
         || err "GNOME failed to install after retries"
 
     # The 'gnome' group pulls in a bunch of apps we don't want on a minimal
@@ -2509,16 +2874,21 @@ install_desktop() {
     done
     log "GNOME cleanup: ${gnome_removed} removed, ${gnome_kept} kept (still required by other apps; menu entries hidden at first boot)"
 
-    arch-chroot /mnt bash <<CHROOT
+    # Quoted heredoc + explicit env (same reasoning as configure_system).
+    arch-chroot /mnt env NX_USERNAME="$USERNAME" NX_KEYMAP_X11="$KEYMAP_X11" \
+        bash <<'CHROOT'
 set -e
 systemctl enable gdm
 
-# GDM autologin - safe because LUKS2 already gates boot-time access
+# GDM autologin. Trade-off (shown on the confirmation screen): the LUKS
+# passphrase is then the ONLY secret between power-on and a logged-in,
+# sudo-capable session - anyone who knows it gets the desktop too. The screen
+# lock and sudo still require the user password.
 mkdir -p /etc/gdm
 cat > /etc/gdm/custom.conf <<GDMEOF
 [daemon]
 AutomaticLoginEnable=True
-AutomaticLogin=${USERNAME}
+AutomaticLogin=${NX_USERNAME}
 GDMEOF
 
 mkdir -p /etc/X11/xorg.conf.d
@@ -2526,7 +2896,7 @@ cat > /etc/X11/xorg.conf.d/00-keyboard.conf <<EOF
 Section "InputClass"
     Identifier "system-keyboard"
     MatchIsKeyboard "on"
-    Option "XkbLayout" "${KEYMAP_X11}"
+    Option "XkbLayout" "${NX_KEYMAP_X11}"
 EndSection
 EOF
 
@@ -2534,6 +2904,13 @@ EOF
 # and always fails inside a chroot (which would abort this set -e block).
 # The X11 keymap is already configured via 00-keyboard.conf above.
 CHROOT
+    local desk_rc=$?
+    [[ "$desk_rc" -eq 0 ]] \
+        || err "GDM/desktop chroot configuration failed (exit $desk_rc) - check the log"
+    # A missing display-manager link means the machine boots to a text console.
+    [[ -L /mnt/etc/systemd/system/display-manager.service ]] \
+        && [[ "$(readlink /mnt/etc/systemd/system/display-manager.service)" == */gdm.service ]] \
+        || err "GDM was not enabled as the display manager - check the log"
 
     # -- NiiX Arch branding -----------------------------------
     log "Applying NiiX Arch branding..."
@@ -2657,6 +3034,360 @@ NVEOF
 }
 
 # -- Final initramfs build (MUST run after ALL packages) ------
+# -- Step: storage - NTFS usable out of the box, removable media writable --
+setup_storage() {
+    hr "Storage: NTFS and removable media"
+
+    # Internal NTFS volumes: mounted read-write under /media at boot (and when
+    # a disk is attached later) by a small root service, so GNOME Files shows
+    # them in the sidebar and they are usable without a click. Hibernated or
+    # unclean volumes fall back to read-only rather than risking the data.
+    info "Installing NTFS auto-mount..."
+    cat > /mnt/usr/local/bin/niix-ntfs <<'NTFSEOF'
+#!/bin/bash
+# niix-ntfs - make NTFS volumes usable out of the box.
+#   niix-ntfs mount        mount every internal NTFS volume under /media (default)
+#   niix-ntfs status       show what is mounted and how
+#   niix-ntfs umount-all   unmount everything this tool mounted
+#   niix-ntfs list         list NTFS volumes found, and why any were skipped
+# Runs at boot and whenever a disk appears (niix-ntfs-mount.service + udev).
+# USB sticks and other removable media are deliberately left to GNOME/udisks2,
+# which mounts them per-user under /run/media/$USER.
+# Settings: /etc/niix-ntfs.conf
+set -uo pipefail
+
+ENABLED=1
+MOUNT_ROOT=/media
+NTFS_UID=""
+NTFS_GID=""
+NTFS_UMASK=0022
+EXCLUDE_UUIDS=""
+INCLUDE_REMOVABLE=0
+EXTRA_OPTIONS=""
+CONF=/etc/niix-ntfs.conf
+# shellcheck source=/dev/null
+[ -r "$CONF" ] && . "$CONF"
+
+STATE_DIR=/run/niix-ntfs
+LOCKFILE=/run/lock/niix-ntfs.lock
+ACTION="${1:-mount}"
+
+msg()  { printf '%s\n' "$*"; }
+warn() { printf 'warning: %s\n' "$*" >&2; }
+
+need_root() {
+    [ "$(id -u)" -eq 0 ] || { echo "niix-ntfs $ACTION must run as root (try: sudo niix-ntfs $ACTION)" >&2; exit 1; }
+}
+
+# Lowest regular account - the desktop user the installer created.
+resolve_owner() {
+    local u
+    if [ -z "$NTFS_UID" ]; then
+        u=$(getent passwd | awk -F: '$3>=1000 && $3<65000 {print $3}' | sort -n | head -1)
+        NTFS_UID="${u:-0}"
+    fi
+    if [ -z "$NTFS_GID" ]; then
+        NTFS_GID=$(getent passwd | awk -F: -v u="$NTFS_UID" '$3==u {print $4; exit}')
+        NTFS_GID="${NTFS_GID:-$NTFS_UID}"
+    fi
+}
+
+# USB / SD / FireWire media are udisks2's job, not ours.
+disk_is_removable() {
+    local disk="$1" tran
+    [ -n "$disk" ] || return 1
+    [ "$(cat "/sys/block/$disk/removable" 2>/dev/null)" = "1" ] && return 0
+    tran=$(lsblk -dno TRAN "/dev/$disk" 2>/dev/null | tr -d ' ')
+    case "$tran" in usb|mmc|ieee1394) return 0 ;; esac
+    return 1
+}
+
+sanitize() {
+    printf '%s' "$1" \
+        | tr -c 'A-Za-z0-9._ -' '_' \
+        | sed -e 's/^[ .]*//' -e 's/[ ]*$//' -e 's/ \+/_/g' \
+        | cut -c1-48
+}
+
+excluded() {
+    local uuid="$1" x
+    for x in $EXCLUDE_UUIDS; do
+        [ "$x" = "$uuid" ] && return 0
+    done
+    return 1
+}
+
+# Every NTFS partition on the machine, one device path per line.
+ntfs_parts() {
+    local dev
+    while IFS= read -r dev; do
+        [ -b "$dev" ] || continue
+        [ "$(blkid -s TYPE -o value "$dev" 2>/dev/null)" = "ntfs" ] && printf '%s\n' "$dev"
+    done < <(lsblk -lno PATH,TYPE 2>/dev/null | awk '$2=="part"{print $1}')
+}
+
+# Prints a skip reason, or nothing when the volume should be mounted.
+skip_reason() {
+    local dev="$1" uuid="$2" parent
+    [ -n "$uuid" ] || { echo "no UUID"; return; }
+    excluded "$uuid" && { echo "excluded in $CONF"; return; }
+    parent=$(lsblk -no PKNAME "$dev" 2>/dev/null | head -1 | tr -d ' ')
+    if [ "$INCLUDE_REMOVABLE" != "1" ] && disk_is_removable "$parent"; then
+        echo "removable - handled by GNOME/udisks2"
+        return
+    fi
+    if grep -qsE "^[^#]*\\b(UUID=)?$uuid\\b" /etc/fstab; then
+        echo "already in /etc/fstab"
+        return
+    fi
+    if findmnt -rn -S "$dev" >/dev/null 2>&1; then
+        echo "already mounted at $(findmnt -rn -o TARGET -S "$dev" | head -1)"
+        return
+    fi
+}
+
+# Windows system volumes get a recognisable name when they have no label.
+probe_name() {
+    local dev="$1" uuid="$2" label name probe
+    label=$(blkid -s LABEL -o value "$dev" 2>/dev/null)
+    name=$(sanitize "$label")
+    if [ -z "$name" ]; then
+        probe="$STATE_DIR/probe"
+        mkdir -p "$probe"
+        if mount -t ntfs3 -o ro "$dev" "$probe" 2>/dev/null 9>&- \
+            || mount -t ntfs-3g -o ro "$dev" "$probe" 2>/dev/null 9>&-; then
+            [ -d "$probe/Windows/System32" ] && name=Windows
+            umount "$probe" 2>/dev/null
+        fi
+        rmdir "$probe" 2>/dev/null
+        [ -z "$name" ] && name="NTFS-${uuid:0:8}"
+    fi
+    # Keep names unique: a second volume with the same label gets its UUID.
+    if mountpoint -q "$MOUNT_ROOT/$name" 2>/dev/null || [ -e "$MOUNT_ROOT/$name" ]; then
+        if ! [ -d "$MOUNT_ROOT/$name" ] || [ -n "$(ls -A "$MOUNT_ROOT/$name" 2>/dev/null)" ]; then
+            name="${name}-${uuid:0:8}"
+        fi
+    fi
+    printf '%s' "$name"
+}
+
+# Read-write with the kernel driver first, then the FUSE driver, then
+# read-only. A volume left hibernated by Windows Fast Startup cannot be
+# written safely, and both drivers refuse it - read-only is the correct,
+# non-destructive outcome there.
+mount_one() {
+    local dev="$1" target="$2" common driver=""
+    common="noatime,nosuid,nodev,uid=$NTFS_UID,gid=$NTFS_GID,umask=$NTFS_UMASK,windows_names"
+    [ -n "$EXTRA_OPTIONS" ] && common="$common,$EXTRA_OPTIONS"
+
+    # 9>&- on every mount: the ntfs-3g FUSE daemon stays alive for the life of
+    # the mount and would otherwise inherit the lock fd and hold it forever,
+    # deadlocking every later run of this script.
+    if mount -t ntfs3 -o "rw,$common" "$dev" "$target" 2>/dev/null 9>&-; then
+        driver=ntfs3
+    elif mount -t ntfs-3g -o "rw,$common" "$dev" "$target" 2>/dev/null 9>&-; then
+        driver=ntfs-3g
+    elif mount -t ntfs3 -o "ro,$common" "$dev" "$target" 2>/dev/null 9>&-; then
+        driver=ntfs3
+    elif mount -t ntfs-3g -o "ro,$common" "$dev" "$target" 2>/dev/null 9>&-; then
+        driver=ntfs-3g
+    else
+        warn "could not mount $dev - see: dmesg | tail"
+        return 1
+    fi
+
+    # Report what the kernel actually gave us: asking for rw does not always
+    # get it (a hibernated volume, a dirty volume, or read-only hardware).
+    if findmnt -rn -o OPTIONS -M "$target" 2>/dev/null | grep -qE '(^|,)ro(,|$)'; then
+        msg "mounted $dev -> $target ($driver, READ-ONLY)"
+        msg "  Writing is blocked because the volume is hibernated, was not shut down"
+        msg "  cleanly, or the disk itself is read-only. In Windows turn off Fast Startup"
+        msg "  (Power Options > Choose what the power buttons do) and shut down fully."
+        msg "  Check/repair from here: sudo ntfsfix $dev"
+    else
+        msg "mounted $dev -> $target ($driver, read-write)"
+    fi
+    return 0
+}
+
+do_mount() {
+    need_root
+    [ "$ENABLED" = "1" ] || { msg "disabled in $CONF"; return 0; }
+    resolve_owner
+    mkdir -p "$MOUNT_ROOT" "$STATE_DIR"
+    local dev uuid reason name target mounted=0
+
+    while IFS= read -r dev; do
+        uuid=$(blkid -s UUID -o value "$dev" 2>/dev/null)
+        reason=$(skip_reason "$dev" "$uuid")
+        [ -n "$reason" ] && continue
+        name=$(probe_name "$dev" "$uuid")
+        target="$MOUNT_ROOT/$name"
+        mkdir -p "$target" || { warn "could not create $target"; continue; }
+        if mount_one "$dev" "$target"; then
+            printf '%s\n' "$target" >> "$STATE_DIR/mounts"
+            mounted=$((mounted + 1))
+        else
+            rmdir "$target" 2>/dev/null
+        fi
+    done < <(ntfs_parts)
+
+    [ "$mounted" -eq 0 ] && msg "no new NTFS volumes to mount"
+    return 0
+}
+
+do_list() {
+    resolve_owner
+    local dev uuid label reason found=0
+    printf '%-12s %-18s %-18s %s\n' DEVICE LABEL UUID STATUS
+    while IFS= read -r dev; do
+        found=1
+        uuid=$(blkid -s UUID -o value "$dev" 2>/dev/null)
+        label=$(blkid -s LABEL -o value "$dev" 2>/dev/null)
+        reason=$(skip_reason "$dev" "$uuid")
+        printf '%-12s %-18s %-18s %s\n' "$dev" "${label:-(no label)}" "$uuid" "${reason:-will be mounted under $MOUNT_ROOT}"
+    done < <(ntfs_parts)
+    [ "$found" -eq 0 ] && msg "no NTFS volumes found"
+    return 0
+}
+
+do_status() {
+    local any=0 line
+    while IFS= read -r line; do
+        any=1; printf '%s\n' "$line"
+    done < <(findmnt -rn -t ntfs3,ntfs-3g,ntfs,fuseblk -o SOURCE,TARGET,FSTYPE,OPTIONS 2>/dev/null \
+             | awk '{printf "%-14s %-28s %-8s %s\n", $1, $2, $3, ($4 ~ /(^|,)ro(,|$)/ ? "read-only" : "read-write")}')
+    [ "$any" -eq 0 ] && msg "no NTFS volumes mounted"
+    return 0
+}
+
+do_umount_all() {
+    need_root
+    local target
+    [ -s "$STATE_DIR/mounts" ] || { msg "nothing mounted by niix-ntfs"; return 0; }
+    while IFS= read -r target; do
+        [ -n "$target" ] || continue
+        if mountpoint -q "$target"; then
+            if umount "$target" 2>/dev/null; then
+                msg "unmounted $target"
+            else
+                warn "$target is busy - close anything using it (lsof +f -- $target)"
+                continue
+            fi
+        fi
+        rmdir "$target" 2>/dev/null
+    done < "$STATE_DIR/mounts"
+    : > "$STATE_DIR/mounts"
+    return 0
+}
+
+case "$ACTION" in
+    mount)
+        # Serialise: udev can fire several times while disks are being probed.
+        mkdir -p "$(dirname "$LOCKFILE")"
+        exec 9>"$LOCKFILE" || exit 1
+        # Bounded wait: if another run really is stuck, this one gives up
+        # quietly instead of hanging the boot service or a udev trigger.
+        if ! flock -w 120 9; then
+            echo "niix-ntfs: another run is in progress - skipping" >&2
+            exit 0
+        fi
+        do_mount
+        ;;
+    list)       do_list ;;
+    status)     do_status ;;
+    umount-all) do_umount_all ;;
+    *)
+        echo "Usage: niix-ntfs {mount|list|status|umount-all}"
+        exit 1
+        ;;
+esac
+NTFSEOF
+    chmod 755 /mnt/usr/local/bin/niix-ntfs
+
+    if [[ ! -f /mnt/etc/niix-ntfs.conf ]]; then
+        cat > /mnt/etc/niix-ntfs.conf <<'NTFSCONFEOF'
+# NiiX NTFS auto-mount settings. Apply changes with: sudo niix-ntfs mount
+# List volumes and their UUIDs with: niix-ntfs list
+
+# Turn auto-mounting of internal NTFS volumes off entirely.
+#ENABLED=0
+
+# Where volumes are mounted. /media is what GNOME Files shows in the sidebar.
+#MOUNT_ROOT=/media
+
+# Who owns the files. Defaults to the first regular account on the system.
+#NTFS_UID=1000
+#NTFS_GID=1000
+
+# 0022 = owner read/write, everyone else read-only. Use 0002 to share with
+# other accounts in the same group, 0077 to keep it entirely private.
+#NTFS_UMASK=0022
+
+# Volumes to leave alone, by UUID, space-separated.
+#EXCLUDE_UUIDS="1234ABCD5678EF90 ABCD12345678EF90"
+
+# Also auto-mount USB/SD NTFS media. Off by default: GNOME already mounts
+# removable media per-user under /run/media, with safe-eject in Files.
+#INCLUDE_REMOVABLE=1
+
+# Extra mount options appended to the defaults.
+#EXTRA_OPTIONS="prealloc"
+NTFSCONFEOF
+        chmod 644 /mnt/etc/niix-ntfs.conf
+    fi
+
+    cat > /mnt/etc/systemd/system/niix-ntfs-mount.service <<'NTFSUNITEOF'
+[Unit]
+Description=NiiX: mount internal NTFS volumes under /media
+Documentation=man:niix-ntfs
+After=local-fs.target
+Wants=local-fs.target
+ConditionPathExists=/usr/local/bin/niix-ntfs
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/niix-ntfs mount
+RemainAfterExit=no
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
+NTFSUNITEOF
+
+    mkdir -p /mnt/etc/udev/rules.d
+    cat > /mnt/etc/udev/rules.d/99-niix-ntfs.rules <<'NTFSUDEVEOF'
+# Mount internal NTFS volumes as soon as they appear, so a drive attached
+# after boot is usable without a reboot. niix-ntfs itself skips removable
+# media (GNOME/udisks2 handles those) and anything already mounted.
+ACTION=="add", SUBSYSTEM=="block", ENV{DEVTYPE}=="partition", ENV{ID_FS_TYPE}=="ntfs", TAG+="systemd", ENV{SYSTEMD_WANTS}+="niix-ntfs-mount.service"
+NTFSUDEVEOF
+
+    arch-chroot /mnt systemctl enable niix-ntfs-mount.service 2>/dev/null \
+        && log "NTFS volumes will be mounted under /media at every boot" \
+        || warn "Could not enable niix-ntfs-mount.service - run 'sudo niix-ntfs mount' by hand"
+
+    # Removable media (USB sticks, SD cards, phones) are GNOME's job: udisks2
+    # mounts them per-user under /run/media with safe-eject in Files. Out of
+    # the box udisks mounts foreign filesystems root-owned, so the desktop
+    # user cannot write to them - this config fixes exactly that.
+    mkdir -p /mnt/etc/udisks2
+    if [[ ! -f /mnt/etc/udisks2/mount_options.conf ]]; then
+        cat > /mnt/etc/udisks2/mount_options.conf <<'UDISKSEOF'
+# Removable media mounted by GNOME Files / udisks2.
+# Without this, udisks mounts NTFS and other foreign filesystems as root-owned,
+# so the desktop user can read but not write them. $UID/$GID are substituted by
+# udisks with the user doing the mounting - they are not shell variables.
+[defaults]
+ntfs:ntfs3_defaults=uid=$UID,gid=$GID,noatime,windows_names
+ntfs:ntfs3_allow=uid=$UID,gid=$GID,umask,dmask,fmask,iocharset,discard,nodiscard,sparse,nosparse,hidden,nohidden,sys_immutable,showmeta,noshowmeta,prealloc,noprealloc,hide_dot_files,nohide_dot_files,windows_names,nocase,case
+ntfs:ntfs_defaults=uid=$UID,gid=$GID,noatime
+UDISKSEOF
+        chmod 644 /mnt/etc/udisks2/mount_options.conf
+    fi
+    log "Removable media: auto-mounted read-write by GNOME (udisks2)"
+}
+
 rebuild_initramfs() {
     hr "Initramfs Rebuild"
     log "Writing final mkinitcpio.conf..."
@@ -2670,24 +3401,33 @@ rebuild_initramfs() {
 MODULES=()
 BINARIES=()
 FILES=()
-HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block encrypt btrfs filesystems fsck)
+HOOKS=(base udev autodetect microcode modconf kms keyboard keymap block encrypt btrfs filesystems fsck)
 MKINIT
+    # No 'consolefont' hook: no FONT= is configured in vconsole.conf, so the hook
+    # would add nothing and only emit a warning on every rebuild.
 
     log "mkinitcpio.conf:"
     cat /mnt/etc/mkinitcpio.conf
 
     log "Rebuilding initramfs (final - after all packages)..."
-    arch-chroot /mnt mkinitcpio -P
+    arch-chroot /mnt mkinitcpio -P \
+        || err "initramfs build failed (mkinitcpio -P) - the system would not boot. Check the log."
 
-    # Verify
-    if lsinitcpio /mnt/boot/initramfs-linux.img 2>/dev/null | grep -q "cryptsetup"; then
+    # Verify the image exists and really contains cryptsetup. The listing is
+    # captured first (not piped into grep -q): under pipefail, grep exiting
+    # early would SIGPIPE lsinitcpio and turn a match into a false failure.
+    [[ -s /mnt/boot/initramfs-linux.img ]] \
+        || err "initramfs-linux.img is missing or empty after mkinitcpio - check the log"
+    local initrd_list
+    initrd_list=$(arch-chroot /mnt lsinitcpio /boot/initramfs-linux.img 2>&1) || true
+    if grep -q "cryptsetup" <<<"$initrd_list"; then
         log "initramfs contains cryptsetup - LUKS prompt will work"
     else
-        warn "cryptsetup NOT found in initramfs - check log"
         {
             echo "--- lsinitcpio initramfs-linux.img ---"
-            lsinitcpio /mnt/boot/initramfs-linux.img 2>&1 || true
+            printf '%s\n' "$initrd_list"
         } >> "$LOGFILE" 2>&1
+        err "cryptsetup NOT found in the initramfs - the encrypted root could not be unlocked. Check the log."
     fi
 }
 
@@ -2697,11 +3437,14 @@ install_limine() {
     log "Installing Limine bootloader..."
 
     # -- 1. Copy EFI binary -----------------------------------
-    mkdir -p /mnt/boot/EFI/limine /mnt/boot/EFI/BOOT
-    cp /mnt/usr/share/limine/BOOTX64.EFI /mnt/boot/EFI/limine/BOOTX64.EFI
+    mkdir -p /mnt/boot/EFI/limine /mnt/boot/EFI/BOOT \
+        || err "Could not create Limine directories on the EFI partition"
+    cp /mnt/usr/share/limine/BOOTX64.EFI /mnt/boot/EFI/limine/BOOTX64.EFI \
+        || err "Could not copy Limine to the EFI partition (full ESP?)"
     # Also install as the UEFI fallback path - many BIOSes boot this
     # automatically when no NVRAM entry is found or has been cleared
-    cp /mnt/usr/share/limine/BOOTX64.EFI /mnt/boot/EFI/BOOT/BOOTX64.EFI
+    cp /mnt/usr/share/limine/BOOTX64.EFI /mnt/boot/EFI/BOOT/BOOTX64.EFI \
+        || err "Could not copy the Limine fallback loader to the EFI partition"
     log "BOOTX64.EFI copied (\EFI\limine\ + fallback \EFI\BOOT\)"
 
     # -- 2. Build kernel cmdline ------------------------------
@@ -2757,8 +3500,10 @@ default_entry: 1
 EOF
     fi
 
+    [[ -s /mnt/boot/EFI/limine/limine.cfg ]] || err "Could not write the Limine config"
     # Mirror config to every location Limine searches
-    cp /mnt/boot/EFI/limine/limine.cfg /mnt/boot/EFI/limine/limine.conf
+    cp /mnt/boot/EFI/limine/limine.cfg /mnt/boot/EFI/limine/limine.conf \
+        || err "Could not write limine.conf next to the Limine loader"
     cp /mnt/boot/EFI/limine/limine.cfg /mnt/boot/EFI/BOOT/limine.cfg
     cp /mnt/boot/EFI/limine/limine.cfg /mnt/boot/EFI/BOOT/limine.conf
     cp /mnt/boot/EFI/limine/limine.cfg /mnt/boot/limine/limine.cfg
@@ -2787,8 +3532,6 @@ EOF
         --unicode \
         && log "Limine registered in UEFI NVRAM" \
         || warn "efibootmgr failed - BIOS will use fallback \EFI\BOOT\BOOTX64.EFI"
-
-    log "Limine registered in UEFI NVRAM"
 
     # Pacman hooks
     mkdir -p /mnt/etc/pacman.d/hooks
@@ -2979,6 +3722,8 @@ pac_retry() {
 }
 
 LOG="$HOME/niixarch-firstboot-$(date +%Y%m%d-%H%M%S).log"
+# Private: the log can contain a generated hotspot password.
+( umask 077; : > "$LOG" )
 exec > >(tee -a "$LOG") 2>&1
 
 niixa_banner "first boot"
@@ -3058,65 +3803,41 @@ gsettings set org.gnome.desktop.wm.preferences button-layout 'appmenu:minimize,m
 gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com 2>/dev/null || true
 log "GNOME settings applied"
 
-# -- Wi-Fi hotspot: optional autostart at login + 15s health check ---
+# -- Wi-Fi hotspot: optional auto mode -------------------
+# Kept up from boot by a root service (niix-hotspot-watchdog): internet checked
+# every 2 min (every 5s while offline), hotspot restored as soon as the
+# internet is back. Change later with: niix-hotspot auto on|off
 echo ""
-read -rp "Enable Wi-Fi hotspot auto-start at login with a background health-check (restarts it if it drops, checked every 15s)? [y/N]: " HOTSPOT_ENABLE
+read -rp "Keep a Wi-Fi hotspot up automatically (from boot, restored after internet outages)? Needs Ethernet or USB tethering as the internet source. [y/N]: " HOTSPOT_ENABLE
 if [[ "$HOTSPOT_ENABLE" =~ ^[Yy]$ ]]; then
-    read -rp "Hotspot SSID [NiiX-Arch]: " HOTSPOT_SSID
-    HOTSPOT_SSID="${HOTSPOT_SSID:-NiiX-Arch}"
-    RANDOM_PASS=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 12)
     while true; do
-        read -rsp "Hotspot password, min 8 characters [leave blank for a random one]: " HOTSPOT_PASS
-        echo ""
-        HOTSPOT_PASS="${HOTSPOT_PASS:-$RANDOM_PASS}"
-        [ "${#HOTSPOT_PASS}" -ge 8 ] && break
-        echo "Password must be at least 8 characters - try again."
+        read -rp "Hotspot SSID [NiiX-Arch]: " HOTSPOT_SSID
+        HOTSPOT_SSID="${HOTSPOT_SSID:-NiiX-Arch}"
+        [ "$(printf '%s' "$HOTSPOT_SSID" | wc -c)" -le 32 ] && break
+        echo "SSID must be at most 32 bytes - try again."
     done
-    [ "$HOTSPOT_PASS" = "$RANDOM_PASS" ] && echo "Generated password: $HOTSPOT_PASS  (write this down)"
-
-    # niix-hotspot deletes and recreates its connection on every 'start' call
-    # using whatever SSID/password are passed, so the watchdog re-asserts
-    # YOUR chosen SSID/password every 15s if the hotspot ever drops.
-    info "Setting up hotspot autostart + watchdog for '${HOTSPOT_SSID}'..."
-    sudo tee /usr/local/bin/niix-hotspot-watchdog > /dev/null <<HSWEOF
-#!/bin/bash
-SSID="${HOTSPOT_SSID}"
-PASS="${HOTSPOT_PASS}"
-
-niix-hotspot start "\$SSID" "\$PASS" >/dev/null 2>&1
-
-while true; do
-    sleep 15
-    if ! nmcli -t -f GENERAL.STATE connection show niix-hotspot 2>/dev/null | grep -q "^GENERAL.STATE:activated"; then
-        niix-hotspot start "\$SSID" "\$PASS" >/dev/null 2>&1
+    while true; do
+        read -rsp "Hotspot password, 8-63 characters [leave blank for a random one]: " HOTSPOT_PASS
+        echo ""
+        [ -z "$HOTSPOT_PASS" ] && break
+        [ "${#HOTSPOT_PASS}" -ge 8 ] && [ "${#HOTSPOT_PASS}" -le 63 ] && break
+        echo "Password must be 8-63 characters - try again."
+    done
+    # Saved only in NetworkManager's root-only profile. 'setup' does NOT bring
+    # the hotspot up: switching Wi-Fi to hotspot mode now could cut the
+    # internet the rest of this first-boot needs. It comes up after the reboot.
+    if sudo niix-hotspot setup "$HOTSPOT_SSID" "$HOTSPOT_PASS"; then
+        if sudo systemctl enable NetworkManager-dispatcher.service niix-hotspot-watchdog.service 2>/dev/null; then
+            log "Hotspot '${HOTSPOT_SSID}' auto mode ON from the next boot (show password: niix-hotspot password)"
+        else
+            warn "Could not enable hotspot auto mode - enable later: niix-hotspot auto on"
+        fi
+    else
+        warn "Hotspot setup failed (no Wi-Fi adapter?) - set it up later: niix-hotspot start [SSID] [PASSWORD]"
     fi
-done
-HSWEOF
-    sudo chmod +x /usr/local/bin/niix-hotspot-watchdog
-
-    # NOTE: must run un-privileged (real $HOME) - this whole firstboot script
-    # is run as the logged-in user, not root, which is what makes --user work.
-    mkdir -p "$HOME/.config/systemd/user"
-    cat > "$HOME/.config/systemd/user/niix-hotspot-watchdog.service" <<'HSUEOF'
-[Unit]
-Description=NiiX hotspot autostart + 15s health check
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/niix-hotspot-watchdog
-Restart=always
-RestartSec=15
-
-[Install]
-WantedBy=default.target
-HSUEOF
-
-    systemctl --user daemon-reload 2>/dev/null || true
-    systemctl --user enable --now niix-hotspot-watchdog.service 2>/dev/null \
-        && log "Hotspot autostart + watchdog enabled for '${HOTSPOT_SSID}' (checks every 15s)" \
-        || warn "Could not enable hotspot watchdog - enable manually: systemctl --user enable --now niix-hotspot-watchdog.service"
+    unset HOTSPOT_PASS
 else
-    log "Hotspot autostart skipped - start it any time with: niix-hotspot start [SSID] [PASSWORD]"
+    log "Hotspot auto mode skipped - any time: niix-hotspot start [SSID] [PASSWORD], then niix-hotspot auto on"
 fi
 
 # -- Bluetooth - ensure service is running ----------------
@@ -3511,6 +4232,23 @@ if [ "${#ext_failed[@]}" -eq 0 ]; then
     log "Extensions installed: dash-to-panel, ArcMenu, screen-rotate"
 else
     for e in "${ext_failed[@]}"; do warn "Could not fetch $e from extensions.gnome.org"; done
+    # Fallback: dash-to-panel and ArcMenu are also packaged (signed) in Arch's
+    # extra repo under the same UUIDs, installed system-wide - so the NiiX
+    # panel still comes up if extensions.gnome.org is down or has no build
+    # for this Shell version yet. (screen-rotate has its own fallback below.)
+    for e in "${ext_failed[@]}"; do
+        case "$e" in
+            dash-to-panel@jderose9.github.com) fb_pkg=gnome-shell-extension-dash-to-panel ;;
+            arcmenu@arcmenu.com)               fb_pkg=gnome-shell-extension-arc-menu ;;
+            *)                                 fb_pkg="" ;;
+        esac
+        [ -n "$fb_pkg" ] || continue
+        if pac_retry -S --noconfirm --needed "$fb_pkg"; then
+            log "Installed $e from the Arch repos ($fb_pkg)"
+        else
+            warn "$e unavailable from both extensions.gnome.org and the repos - panel will be vanilla GNOME until it is installed"
+        fi
+    done
 fi
 
 # Guaranteed source fallback for the 360 deg auto-rotate extension (requested).
@@ -3621,9 +4359,9 @@ apply_niix_panel_settings() {
     dconf write $AM/menu-hotkey "'Super_L'"
     DTP=/org/gnome/shell/extensions/dash-to-panel
     dconf write $DTP/multi-monitors "false"
-    dconf write $DTP/show-apps-button "false"
-    dconf write $DTP/panel-anchors "'{\"0\":\"LEFT\"}'"
-    dconf write $DTP/panel-element-positions "'{\"0\":[{\"element\":\"showAppsButton\",\"visible\":false,\"position\":\"stackedTL\"},{\"element\":\"activitiesButton\",\"visible\":false,\"position\":\"stackedTL\"},{\"element\":\"leftBox\",\"visible\":true,\"position\":\"stackedTL\"},{\"element\":\"taskbar\",\"visible\":true,\"position\":\"stackedTL\"},{\"element\":\"centerBox\",\"visible\":true,\"position\":\"stackedBR\"},{\"element\":\"rightBox\",\"visible\":true,\"position\":\"stackedBR\"},{\"element\":\"dateMenu\",\"visible\":true,\"position\":\"stackedBR\"},{\"element\":\"systemMenu\",\"visible\":false,\"position\":\"stackedBR\"},{\"element\":\"desktopButton\",\"visible\":true,\"position\":\"stackedBR\"}]}'"
+    # Per-monitor dicts (panel-element-positions, panel-anchors, ...) are NOT
+    # written here: replacing them with a {"0": ...} dict deletes the
+    # monitor-ID entries dash-to-panel keeps. niix-panel-fix handles them.
 }
 for i in 1 2 3 4 5 6 7 8 9 10; do
     sleep 4
@@ -3640,22 +4378,202 @@ Exec=$HOME/.local/bin/niix-panel-once.sh
 X-GNOME-Autostart-enabled=true
 NoDisplay=true
 PANELDT
-log "Dash-to-panel Show Apps fix will apply on next login"
+
+# -- Hide dash-to-panel's 9-dot "Show Applications" button (every login) --
+# ArcMenu is the start menu; the GNOME app-grid button must not appear too.
+# dash-to-panel stores per-monitor layout under each monitor's ID
+# (vendor-serial) and falls back to defaults - with Show Apps VISIBLE - for any
+# monitor without an entry. This helper computes the IDs exactly like
+# dash-to-panel (via Mutter's DisplayConfig), forces Show Apps + Activities
+# hidden for every monitor, and writes only when something differs. It runs
+# for ~45s at each login to outlast dash-to-panel's own start-up save.
+sudo tee /usr/local/bin/niix-panel-fix > /dev/null <<'NIIXPANELFIX'
+#!/usr/bin/env python3
+# niix-panel-fix - keep dash-to-panel's Show Applications (9-dot) button hidden
+#   niix-panel-fix           apply once
+#   niix-panel-fix --watch   apply repeatedly for ~45s (used at login)
+import ast, json, subprocess, sys, time
+
+BASE = "/org/gnome/shell/extensions/dash-to-panel/"
+HIDE = ("showAppsButton", "activitiesButton")
+NIIX_ELEMENTS = [
+    {"element": "showAppsButton", "visible": False, "position": "stackedTL"},
+    {"element": "activitiesButton", "visible": False, "position": "stackedTL"},
+    {"element": "leftBox", "visible": True, "position": "stackedTL"},
+    {"element": "taskbar", "visible": True, "position": "stackedTL"},
+    {"element": "centerBox", "visible": True, "position": "stackedBR"},
+    {"element": "rightBox", "visible": True, "position": "stackedBR"},
+    {"element": "dateMenu", "visible": True, "position": "stackedBR"},
+    {"element": "systemMenu", "visible": False, "position": "stackedBR"},
+    {"element": "desktopButton", "visible": True, "position": "stackedBR"},
+]
+MISSING_DEFAULTS = {
+    "panel-positions": "BOTTOM",
+    "panel-sizes": 44,
+    "panel-lengths": 100,
+    "panel-anchors": "LEFT",
+}
+
+
+def dconf_read(key):
+    try:
+        out = subprocess.run(["dconf", "read", BASE + key], capture_output=True,
+                             text=True, timeout=10).stdout.strip()
+    except Exception:
+        return None
+    if not out:
+        return {}
+    try:
+        data = json.loads(ast.literal_eval(out))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def dconf_write(key, value):
+    text = json.dumps(value, separators=(",", ":"))
+    gvariant = "'" + text.replace("\\", "\\\\").replace("'", "\\'") + "'"
+    subprocess.run(["dconf", "write", BASE + key, gvariant], timeout=10,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def monitor_ids():
+    # Same derivation as dash-to-panel's panelSettings.js: vendor-serial,
+    # else the connector on a clash, else the logical-monitor index.
+    try:
+        from gi.repository import Gio
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        reply = bus.call_sync("org.gnome.Mutter.DisplayConfig",
+                              "/org/gnome/Mutter/DisplayConfig",
+                              "org.gnome.Mutter.DisplayConfig",
+                              "GetCurrentState", None, None,
+                              Gio.DBusCallFlags.NONE, 5000, None)
+        logical = reply.unpack()[2]
+    except Exception:
+        return []
+    ids, seen = [], set()
+    for i, lm in enumerate(logical):
+        try:
+            connector, vendor, _product, serial = lm[5][0]
+        except Exception:
+            connector = vendor = serial = ""
+        mid = "%s-%s" % (vendor, serial) if vendor and serial else str(i)
+        if mid in seen:
+            mid = connector if connector and connector not in seen else str(i)
+        seen.add(mid)
+        ids.append(mid)
+    return ids
+
+
+def fixed_elements(current):
+    if not isinstance(current, list) or not all(isinstance(e, dict) for e in current):
+        current = [dict(e) for e in NIIX_ELEMENTS]
+    else:
+        current = [dict(e) for e in current]
+    names = [e.get("element") for e in current]
+    if "showAppsButton" not in names:
+        current.insert(0, {"element": "showAppsButton", "visible": False, "position": "stackedTL"})
+    for e in current:
+        if e.get("element") in HIDE:
+            e["visible"] = False
+    return current
+
+
+def apply():
+    ids = monitor_ids()
+    positions = dconf_read("panel-element-positions")
+    if positions is None:
+        return
+    keys = list(positions.keys())
+    for k in ids or (["0"] if not keys else []):
+        if k not in keys:
+            keys.append(k)
+    wanted = {k: fixed_elements(positions.get(k)) for k in keys}
+    if wanted != positions:
+        dconf_write("panel-element-positions", wanted)
+    for key, default in MISSING_DEFAULTS.items():
+        cur = dconf_read(key)
+        if cur is None:
+            continue
+        new = dict(cur)
+        for k in keys:
+            new.setdefault(k, default)
+        if new != cur:
+            dconf_write(key, new)
+
+
+def main():
+    if "--watch" in sys.argv[1:]:
+        for _ in range(15):
+            apply()
+            time.sleep(3)
+    else:
+        apply()
+
+
+if __name__ == "__main__":
+    main()
+NIIXPANELFIX
+sudo chmod 755 /usr/local/bin/niix-panel-fix
+cat > "$HOME/.config/autostart/niix-panel-fix.desktop" <<'PANELFIXDT'
+[Desktop Entry]
+Type=Application
+Name=NiiX Panel: hide Show Apps button
+Exec=/usr/local/bin/niix-panel-fix --watch
+X-GNOME-Autostart-enabled=true
+NoDisplay=true
+PANELFIXDT
+/usr/local/bin/niix-panel-fix 2>/dev/null || true
+log "Dash-to-panel: 9-dot Show Apps button hidden on every monitor (re-checked at each login)"
+
+# -- initramfs hook sets ------------------------------------
+# encrypt  (busybox) reads cryptdevice=   - what the installer's Limine entry uses
+# sd-encrypt (systemd) reads rd.luks.name= - what the CachyOS Limine entry uses
+# The hook set and the Limine cmdline must ALWAYS match, or nothing can unlock root.
+NIIX_ENCRYPT_HOOKS='HOOKS=(base udev autodetect microcode modconf kms keyboard keymap block encrypt btrfs filesystems fsck)'
+NIIX_SD_HOOKS='HOOKS=(base systemd autodetect microcode modconf kms keyboard sd-vconsole block sd-encrypt btrfs filesystems fsck)'
+niix_write_mkinitcpio() {
+    printf 'MODULES=()\nBINARIES=()\nFILES=()\n%s\n' "$1" | sudo tee /etc/mkinitcpio.conf > /dev/null
+}
+niix_sd_hooks_active() {
+    grep -Eq '^HOOKS=.*[( ]sd-encrypt[ )]' /etc/mkinitcpio.conf 2>/dev/null
+}
+# Captured into a variable before grepping: a pipe into grep -q can SIGPIPE
+# lsinitcpio on large images and report a false failure.
+niix_initrd_has_sd_crypt() {
+    local listing
+    [ -s "$1" ] || return 1
+    listing=$(sudo lsinitcpio "$1" 2>/dev/null) || return 1
+    grep -q 'systemd-cryptsetup' <<<"$listing"
+}
 
 # -- CachyOS kernel ----------------------------------------
 if ! pacman -Q linux-cachyos &>/dev/null; then
     info "Setting up CachyOS repository..."
-    cd /tmp
-    rm -rf /tmp/cachyos-repo /tmp/cachyos-repo.tar.xz
-    if curl -fL --retry 5 --retry-delay 3 -o cachyos-repo.tar.xz \
+    CACHY_TMP=$(mktemp -d /tmp/niix-cachyos.XXXXXX) || CACHY_TMP=""
+    if [ -n "$CACHY_TMP" ] \
+        && curl -fL --retry 5 --retry-delay 3 -o "$CACHY_TMP/cachyos-repo.tar.xz" \
             https://mirror.cachyos.org/cachyos-repo.tar.xz \
-        && tar xf cachyos-repo.tar.xz \
-        && cd /tmp/cachyos-repo; then
-        yes | sudo ./cachyos-repo.sh
-        cd ~ && rm -rf /tmp/cachyos-repo /tmp/cachyos-repo.tar.xz
+        && tar xf "$CACHY_TMP/cachyos-repo.tar.xz" -C "$CACHY_TMP" \
+        && [ -f "$CACHY_TMP/cachyos-repo/cachyos-repo.sh" ]; then
+        # Upstream has no non-interactive flag, and piping 'yes' into it hangs
+        # forever on any numbered provider prompt ("y" is never a valid number).
+        # Instead, a private shim makes every pacman call it runs use
+        # --noconfirm (pacman's own defaults), and stdin is closed so an
+        # unexpected prompt fails fast instead of blocking the first boot.
+        mkdir -p "$CACHY_TMP/shim"
+        printf '#!/bin/sh\nexec /usr/bin/pacman --noconfirm "$@"\n' > "$CACHY_TMP/shim/pacman"
+        chmod 755 "$CACHY_TMP/shim/pacman"
+        ( cd "$CACHY_TMP/cachyos-repo" \
+          && sudo env PATH="$CACHY_TMP/shim:/usr/local/sbin:/usr/local/bin:/usr/bin" \
+                ./cachyos-repo.sh --install < /dev/null ) \
+            || warn "cachyos-repo.sh reported an error - checking whether the repo was added anyway..."
     else
-        cd ~
-        warn "Could not download/extract the CachyOS repo installer - staying on the stock kernel."
+        warn "Could not download/extract the CachyOS repo installer."
+    fi
+    [ -n "$CACHY_TMP" ] && rm -rf "$CACHY_TMP"
+    if ! grep -q '^\[cachyos' /etc/pacman.conf; then
+        warn "CachyOS repository is not configured - staying on the stock kernel."
         warn "Re-run later: bash /usr/local/bin/niixarch-firstboot.sh"
     fi
 
@@ -3706,34 +4624,33 @@ if ! pacman -Q linux-cachyos &>/dev/null; then
         || warn "System upgrade incomplete - run 'sudo cachyos-rate-mirrors && sudo pacman -Syu' once mirrors sync."
 
     info "Installing CachyOS kernel..."
-    pac_retry -Sy --noconfirm --needed linux-cachyos linux-cachyos-headers \
-        || warn "CachyOS kernel install failed - staying on the stock linux kernel for now."
-
-    # -- Only switch initramfs hooks if the CachyOS kernel is really installed --
-    # sd-encrypt reads rd.luks.name= and IGNORES cryptdevice=. The Limine config
-    # is only converted to rd.luks.name= further below (and only when
-    # /boot/vmlinuz-linux-cachyos exists). If the kernel install failed and we
-    # switched hooks anyway, the stock kernel's initramfs would be rebuilt with
-    # sd-encrypt while Limine still passes cryptdevice= - no LUKS prompt, no boot.
-    if pacman -Q linux-cachyos &>/dev/null; then
-        log "CachyOS kernel installed"
-        info "Switching to systemd initramfs hooks for CachyOS..."
-        # No GPU modules are forced here. CachyOS hardware detection (chwd, below) installs
-        # the right driver and its pacman hook rebuilds the initramfs correctly for the
-        # detected topology (early-KMS for a single dGPU, offload-only for Optimus).
-        sudo tee /etc/mkinitcpio.conf > /dev/null <<'MKEOF'
-MODULES=()
-BINARIES=()
-FILES=()
-HOOKS=(base systemd autodetect microcode modconf kms keyboard sd-vconsole block sd-encrypt btrfs filesystems fsck)
-MKEOF
-        sudo mkinitcpio -P
-        log "initramfs rebuilt with systemd hooks"
-    else
-        warn "linux-cachyos not installed - keeping the stock kernel and its encrypt-hook initramfs."
+    if grep -q '^\[cachyos' /etc/pacman.conf; then
+        pac_retry -Sy --noconfirm --needed linux-cachyos linux-cachyos-headers \
+            || warn "CachyOS kernel install failed - staying on the stock linux kernel for now."
     fi
+    pacman -Q linux-cachyos &>/dev/null && log "CachyOS kernel installed"
 else
     log "CachyOS kernel already installed"
+fi
+
+# -- Switch initramfs to systemd hooks (only with the CachyOS kernel present) --
+# Runs on every (re-)run until it has happened, independent of the install step
+# above. A failed rebuild is reverted immediately so the stock kernel - which
+# Limine still boots with cryptdevice= at this point - always stays bootable.
+# No GPU modules are forced here: chwd (below) installs the driver and its
+# pacman hook rebuilds the initramfs for the detected topology.
+if pacman -Q linux-cachyos &>/dev/null && ! niix_sd_hooks_active; then
+    info "Switching to systemd initramfs hooks for CachyOS..."
+    sudo cp -a /etc/mkinitcpio.conf /etc/mkinitcpio.conf.niix-encrypt.bak 2>/dev/null || true
+    niix_write_mkinitcpio "$NIIX_SD_HOOKS"
+    if sudo mkinitcpio -P; then
+        log "initramfs rebuilt with systemd hooks"
+    else
+        warn "initramfs build with systemd hooks FAILED - reverting to the encrypt hooks so the current boot entry keeps working."
+        niix_write_mkinitcpio "$NIIX_ENCRYPT_HOOKS"
+        sudo mkinitcpio -P \
+            || warn "Reverted initramfs rebuild also failed - do NOT reboot until 'sudo mkinitcpio -P' succeeds."
+    fi
 fi
 
 # -- GPU drivers ------------------------------------------
@@ -3860,53 +4777,93 @@ else
 fi
 rmdir "$TMP_MNT" 2>/dev/null || true
 
+# -- Verify the CachyOS initramfs BEFORE Limine is pointed at it --
+# Limine is only switched to the CachyOS kernel (rd.luks.name=) once its
+# initramfs provably contains systemd-cryptsetup. Otherwise nothing is rewritten
+# and, if the hooks were already switched, they are reverted so the existing
+# cryptdevice= entry keeps booting.
+LIMINE_CONF=""
+for f in /boot/EFI/limine/limine.conf /boot/limine/limine.cfg /boot/limine.cfg /boot/EFI/limine/limine.cfg; do
+    [ -f "$f" ] && LIMINE_CONF="$f" && break
+done
+CURRENT_CMDLINE=""
+[ -n "$LIMINE_CONF" ] && CURRENT_CMDLINE=$(grep -m1 "cmdline:" "$LIMINE_CONF" | sed 's/.*cmdline: //')
+
+INITRAMFS_OK=false
+if pacman -Q linux-cachyos &>/dev/null \
+    && [ -f /boot/vmlinuz-linux-cachyos ] \
+    && niix_sd_hooks_active \
+    && niix_initrd_has_sd_crypt /boot/initramfs-linux-cachyos.img; then
+    INITRAMFS_OK=true
+    log "CachyOS initramfs verified (systemd-cryptsetup present)"
+elif pacman -Q linux-cachyos &>/dev/null; then
+    warn "Could not verify LUKS support in the CachyOS initramfs - Limine will NOT be switched to it."
+fi
+
+if [ "$INITRAMFS_OK" != "true" ] && niix_sd_hooks_active; then
+    if printf '%s' "$CURRENT_CMDLINE" | grep -q 'cryptdevice='; then
+        warn "Reverting to encrypt hooks so the current Limine entry (cryptdevice=) stays bootable..."
+        niix_write_mkinitcpio "$NIIX_ENCRYPT_HOOKS"
+        sudo mkinitcpio -P \
+            || warn "Revert rebuild failed - do NOT reboot until 'sudo mkinitcpio -P' succeeds."
+    else
+        warn "Limine already uses rd.luks.name= but the initramfs could not be verified - run 'sudo mkinitcpio -P' and check it before rebooting."
+    fi
+fi
+
 # -- Update Limine for CachyOS + @clean -------------------
 LIMINE_UPDATED=false
-if [ -f /boot/vmlinuz-linux-cachyos ]; then
+if [ "$INITRAMFS_OK" = "true" ] && [ -n "$LIMINE_CONF" ] && [ -n "$CURRENT_CMDLINE" ]; then
     info "Updating Limine config..."
-    LIMINE_CONF=""
-    for f in /boot/limine/limine.cfg /boot/limine.cfg /boot/EFI/limine/limine.cfg; do
-        [ -f "$f" ] && LIMINE_CONF="$f" && break
-    done
+    NEW_CMDLINE=$(printf '%s\n' "$CURRENT_CMDLINE" | sed 's|cryptdevice=UUID=\([^:]*\):\([^ ]*\)|rd.luks.name=\1=\2|')
+    # NOTE: 'subvol=@\b' can never match '@' followed by a space (\b needs a
+    # word char after '@'). Match '@' followed by a space or EOL.
+    CLEAN_CMDLINE=$(printf '%s\n' "$NEW_CMDLINE" | sed -E 's/rootflags=subvol=@( |$)/rootflags=subvol=@clean\1/')
 
-    if [ -n "$LIMINE_CONF" ]; then
-        CURRENT_CMDLINE=$(grep -m1 "cmdline:" "$LIMINE_CONF" | sed 's/.*cmdline: //')
-        NEW_CMDLINE=$(echo "$CURRENT_CMDLINE" | sed 's|cryptdevice=UUID=\([^:]*\):\([^ ]*\)|rd.luks.name=\1=\2|')
-        # NOTE: 'subvol=@\b' can never match '@' followed by a space (\b needs a
-        # word char after '@'), so the old pattern silently left the clean entry
-        # booting the normal @ subvolume. Match '@' followed by a space or EOL.
-        CLEAN_CMDLINE=$(echo "$NEW_CMDLINE" | sed -E 's/rootflags=subvol=@( |$)/rootflags=subvol=@clean\1/')
-
-        if [ "$IS_DUALBOOT" = "true" ]; then
-            WIN_ENTRY="/Windows Boot Manager
+    if [ "$IS_DUALBOOT" = "true" ]; then
+        WIN_ENTRY="/Windows Boot Manager
     protocol: efi
     path: boot():/EFI/Microsoft/Boot/bootmgfw.efi
 
 "
-        else
-            WIN_ENTRY=""
-        fi
+    else
+        WIN_ENTRY=""
+    fi
 
-        # Only offer the clean-state entry if the snapshot actually exists -
-        # otherwise selecting it would fail to mount root and drop to emergency.
-        CLEAN_ENTRY=""
-        if [ "$CLEAN_OK" = "true" ]; then
-            CLEAN_ENTRY="
+    # Only offer the clean-state entry if the snapshot actually exists -
+    # otherwise selecting it would fail to mount root and drop to emergency.
+    CLEAN_ENTRY=""
+    if [ "$CLEAN_OK" = "true" ]; then
+        CLEAN_ENTRY="
 
 /NiiX Arch (clean state)
     protocol: linux
     path: boot():/vmlinuz-linux-cachyos
     cmdline: $CLEAN_CMDLINE
     module_path: boot():/initramfs-linux-cachyos.img"
+    fi
+
+    # default_entry is 1-based: with the Windows entry present, NiiX Arch is
+    # entry 2; in single-boot it is entry 1. Fallback entries come after it.
+    DEFAULT_ENTRY=1
+    [ -n "$WIN_ENTRY" ] && DEFAULT_ENTRY=2
+
+    # $1 = true -> keep a stock-kernel fallback entry (used until the stock
+    # kernel is removed, so there is never a moment with only one bootable
+    # kernel in the menu).
+    niix_write_limine() {
+        local stock_entry="" tmp dst copied=0
+        if [ "$1" = "true" ]; then
+            stock_entry="
+
+/NiiX Arch (stock kernel fallback)
+    protocol: linux
+    path: boot():/vmlinuz-linux
+    cmdline: $NEW_CMDLINE
+    module_path: boot():/initramfs-linux.img"
         fi
-
-        # default_entry is 1-based: with the Windows entry present, NiiX Arch is
-        # entry 2; in single-boot it is entry 1.
-        DEFAULT_ENTRY=1
-        [ -n "$WIN_ENTRY" ] && DEFAULT_ENTRY=2
-
-        TMPFILE=$(mktemp)
-        cat > "$TMPFILE" <<LIMEOF
+        tmp=$(mktemp) || return 1
+        cat > "$tmp" <<LIMEOF
 timeout: 5
 interface_branding: NiiX Arch
 interface_branding_colour: 6
@@ -3917,59 +4874,52 @@ ${WIN_ENTRY}/NiiX Arch
     protocol: linux
     path: boot():/vmlinuz-linux-cachyos
     cmdline: $NEW_CMDLINE
-    module_path: boot():/initramfs-linux-cachyos.img${CLEAN_ENTRY}
+    module_path: boot():/initramfs-linux-cachyos.img${stock_entry}${CLEAN_ENTRY}
 LIMEOF
-        copied=0
         for dst in /boot/EFI/limine/limine.cfg /boot/EFI/limine/limine.conf \
                    /boot/EFI/BOOT/limine.cfg   /boot/EFI/BOOT/limine.conf \
                    /boot/limine/limine.cfg     /boot/limine/limine.conf \
                    /boot/limine.cfg; do
-            sudo cp "$TMPFILE" "$dst" 2>/dev/null && copied=$(( copied + 1 ))
+            sudo cp "$tmp" "$dst" 2>/dev/null && copied=$(( copied + 1 ))
         done
-        rm "$TMPFILE"
-        if [ "$copied" -gt 0 ]; then
-            LIMINE_UPDATED=true
-            log "Limine updated ($copied locations) - CachyOS kernel$([ "$CLEAN_OK" = "true" ] && echo ' - @clean fallback')"
-        else
-            warn "Could not write any Limine config - update Limine manually before rebooting"
-        fi
-    else
-        warn "Could not find limine config - update Limine manually"
+        rm -f "$tmp"
+        [ "$copied" -gt 0 ]
+    }
+
+    # The stock initramfs was rebuilt with the same sd-encrypt hooks, so it
+    # takes rd.luks.name= too - offer it only once that is verified.
+    STOCK_FALLBACK=false
+    if [ -f /boot/vmlinuz-linux ] && niix_initrd_has_sd_crypt /boot/initramfs-linux.img; then
+        STOCK_FALLBACK=true
     fi
-else
-    warn "CachyOS kernel not found at /boot/vmlinuz-linux-cachyos"
+
+    if niix_write_limine "$STOCK_FALLBACK"; then
+        LIMINE_UPDATED=true
+        log "Limine updated - CachyOS kernel$([ "$STOCK_FALLBACK" = "true" ] && echo ' + stock fallback')$([ "$CLEAN_OK" = "true" ] && echo ' + @clean fallback')"
+    else
+        warn "Could not write any Limine config - Limine left unchanged"
+    fi
+elif [ "$INITRAMFS_OK" = "true" ]; then
+    warn "Could not find/read the Limine config - update Limine manually"
 fi
 
 # -- Remove stock linux kernel -----------------------------
-# Only safe once ALL of these are true: the CachyOS kernel is installed,
-# Limine now points at it, its initramfs actually exists, AND that initramfs
-# was actually built with the sd-encrypt hook. The hooks switch (HOOKS=...
-# above) happens before this point but mkinitcpio can fail silently on a
-# mirror blip or a bad hook name - checking only "does the kernel file
-# exist" doesn't catch a broken/stale initramfs missing LUKS support, which
-# combined with removing the fallback kernel is exactly how you get an
-# unbootable encrypted system.
-INITRAMFS_OK=false
-if [ -f /boot/initramfs-linux-cachyos.img ]; then
-    if command -v lsinitcpio &>/dev/null \
-        && lsinitcpio /boot/initramfs-linux-cachyos.img 2>/dev/null | grep -qi "systemd-cryptsetup"; then
-        INITRAMFS_OK=true
-    else
-        warn "Could not confirm sd-encrypt/systemd-cryptsetup is present in the CachyOS initramfs"
-    fi
-else
-    warn "CachyOS initramfs not found at /boot/initramfs-linux-cachyos.img"
-fi
-
-if pacman -Q linux-cachyos &>/dev/null \
-    && [ -f /boot/vmlinuz-linux-cachyos ] \
-    && [ "$LIMINE_UPDATED" = "true" ] \
-    && [ "$INITRAMFS_OK" = "true" ]; then
+# Only once the CachyOS kernel is installed, its initramfs is verified to
+# unlock LUKS, AND Limine already boots it. The fallback entry is dropped from
+# Limine only after the removal has actually succeeded.
+if [ "$INITRAMFS_OK" = "true" ] && [ "$LIMINE_UPDATED" = "true" ] && pacman -Q linux &>/dev/null; then
     info "Removing stock linux kernel..."
-    sudo pacman -Rns --noconfirm linux linux-headers 2>/dev/null \
-        && log "Stock kernel removed - CachyOS only" \
-        || warn "Could not remove stock kernel - run: sudo pacman -Rns linux linux-headers"
-else
+    RM_PKGS=(linux)
+    pacman -Q linux-headers &>/dev/null && RM_PKGS+=(linux-headers)
+    if sudo pacman -Rns --noconfirm "${RM_PKGS[@]}"; then
+        log "Stock kernel removed - CachyOS only"
+        niix_write_limine false \
+            && log "Limine: stock-kernel fallback entry removed" \
+            || warn "Could not drop the stock fallback entry from Limine (it now points at a removed kernel)"
+    else
+        warn "Could not remove stock kernel - it stays as the Limine fallback. Remove later: sudo pacman -Rns ${RM_PKGS[*]}"
+    fi
+elif pacman -Q linux &>/dev/null; then
     warn "Keeping the stock linux kernel (CachyOS kernel, Limine update, or initramfs LUKS support not confirmed)."
 fi
 
@@ -4267,6 +5217,11 @@ enabled-extensions=['appindicatorsupport@rgcjonas.gmail.com', 'dash-to-panel@jde
 color-scheme='prefer-dark'
 accent-color='pink'
 icon-theme='NiiX'
+
+[org/gnome/desktop/media-handling]
+automount=true
+automount-open=false
+autorun-never=false
 DCONFEOF
 sudo dconf update 2>/dev/null \
     && log "Dash pinned: Nautilus - Helium - Lutris - Steam - Heroic - Stremio" \
@@ -4284,7 +5239,8 @@ echo -e "  ${CYAN}-${NC}  Steam: dGPU is automatic on hybrid systems - optional 
 echo -e "  ${CYAN}-${NC}  Run any app on the dGPU: ${GREEN}gpu-run <app>${NC}  (e.g. gpu-run blender)"
 echo -e "  ${CYAN}-${NC}  Steam one-time: Settings -> Compatibility -> Steam Play for all titles -> ${GREEN}Proton-CachyOS${NC}"
 echo -e "  ${CYAN}-${NC}  FreeSync/G-Sync monitor? Settings -> Displays -> enable ${GREEN}Variable Refresh Rate${NC}"
-echo -e "  ${CYAN}-${NC}  Phone-friendly Wi-Fi hotspot: ${GREEN}niix-hotspot start${NC}"
+echo -e "  ${CYAN}-${NC}  NTFS drives: auto-mounted under ${GREEN}/media${NC}  (${GREEN}niix-ntfs list${NC})"
+echo -e "  ${CYAN}-${NC}  Wi-Fi hotspot: ${GREEN}niix-hotspot start${NC}  - keep it up automatically: ${GREEN}niix-hotspot auto on${NC}"
 echo -e "  ${CYAN}-${NC}  Refresh clean snapshot: ${GREEN}sudo niixarch-refresh-clean${NC}"
 echo -e "  ${CYAN}-${NC}  Log saved to: $LOG"
 echo ""
@@ -4724,6 +5680,7 @@ configure_system
 } >> "$LOGFILE" 2>&1
 
 install_desktop
+setup_storage
 rebuild_initramfs
 install_limine
 setup_firstboot
