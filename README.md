@@ -7,7 +7,7 @@ https://niixa.org
 
 ---
 
-## ✨ Features
+##  Features
 
 - **Dual‑boot or single‑boot** – Detects Windows automatically, preserves existing OS in dual‑boot mode.
 - **Full disk encryption** – LUKS2 with a custom passphrase.
@@ -21,7 +21,7 @@ https://niixa.org
 
 ---
 
-## 📋 Requirements
+##  Requirements
 
 - **UEFI system** (Legacy BIOS is not supported)
 - **Secure Boot disabled** – Limine does not support it
@@ -30,7 +30,7 @@ https://niixa.org
 
 ---
 
-## 🚀 How to run
+##  How to run
 
 1. Boot the [Arch Linux live ISO](https://archlinux.org/download/).
 2. Connect to the internet (use `iwctl` if you need WiFi).
