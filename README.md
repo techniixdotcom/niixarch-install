@@ -38,58 +38,35 @@ A fully automated Arch Linux installer that sets up a modern, gaming‑ready sys
 
 ### 1. Download the Arch Linux ISO
 
-Get the latest ISO from the official site: **https://archlinux.org/download/**
+https://archlinux.org/download/
 
 ### 2. Put it on a USB stick
 
-Use one of these tools to write the ISO to a USB stick (this erases the stick):
-
-- **Rufus** (Windows): https://rufus.ie
-- **balenaEtcher** (Windows, macOS, Linux): https://etcher.balena.io
+Use **balenaEtcher** (https://etcher.balena.io) to write the ISO to a USB stick, or install **Ventoy** (https://www.ventoy.net) on the stick and copy the ISO onto it.
 
 ### 3. Boot from the USB stick
 
-1. In your BIOS/UEFI settings, **turn Secure Boot off**.
-2. Restart and open the boot menu (usually **F12**, **F11**, **F8** or **Esc** while the PC starts).
-3. Choose the USB stick, then the first entry, **Arch Linux install medium**.
-4. Wait for the text prompt: `root@archiso ~ #`
+1. In your BIOS, **turn Secure Boot off**.
+2. Restart and open the boot menu (usually **F12**, **F11** or **Esc**).
+3. Pick the USB stick, then **Arch Linux install medium**.
 
-> **Not a US keyboard?** Some symbols are in different places until you switch. For example, `loadkeys de` (German), `loadkeys fr` (French) or `loadkeys uk` (UK).
+### 4. Connect to Wi-Fi
 
-### 4. Connect to the internet
+Skip this step if you use a network cable.
 
-**Ethernet:** just plug in the cable. You're already online, so skip to step 5.
-
-**Wi-Fi:** type these commands one at a time.
-
-Find your Wi-Fi card's name:
+Type:
 
 ```bash
-iwctl device list
+iwctl
 ```
 
-It's usually `wlan0`; use whatever name is shown in the commands below.
-
-Scan, then list the networks in range:
+Then type this, using your Wi-Fi name (keep the quotes):
 
 ```bash
-iwctl station wlan0 scan
-iwctl station wlan0 get-networks
+station wlan0 connect "YOUR-WIFI-NAME"
 ```
 
-Connect, replacing `YOUR-NETWORK` and `YOUR-PASSWORD` (keep the quotes):
-
-```bash
-iwctl --passphrase "YOUR-PASSWORD" station wlan0 connect "YOUR-NETWORK"
-```
-
-Check it works. You should see replies, not errors:
-
-```bash
-ping -c 3 archlinux.org
-```
-
-> **Wi-Fi not found or "blocked"?** Run `rfkill unblock wifi` and try again.
+Enter your Wi-Fi password when asked, then press **Ctrl + C** to leave.
 
 ### 5. Run the installer
 
@@ -97,16 +74,12 @@ ping -c 3 archlinux.org
 bash <(curl -fsSL https://niixa.org/install)
 ```
 
-The installer checks itself against the checksum in this repository before changing anything, then asks a few questions and does the rest.
+Answer the questions and the installer does the rest. After it reboots, unlock the disk with your passphrase; the first login finishes the setup automatically.
 
-**Recommended – verify before running:**
+---
+
+**Optional – verify the installer before running it:**
 
 ```bash
 curl -fsSLo install https://niixa.org/install && curl -fsSL https://raw.githubusercontent.com/techniixdotcom/niixarch-install/main/install.sha256 | grep ' install$' | sha256sum -c && bash install
 ```
-
-If you see `install: OK`, the installer starts. If you see `FAILED`, don't run it.
-
-### 6. First login
-
-After the install the PC reboots. Unlock the disk with your passphrase. On the first login a one-time setup finishes the system (kernel, drivers, apps) and reboots once more when it's done.
