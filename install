@@ -5691,7 +5691,7 @@ panel-lengths='{"0":100}'
 panel-anchors='{"0":"LEFT"}'
 multi-monitors=false
 show-apps-button=false
-panel-element-positions='{"0":[{"element":"showAppsButton","visible":false,"position":"stackedTL"},{"element":"activitiesButton","visible":false,"position":"stackedTL"},{"element":"leftBox","visible":true,"position":"stackedTL"},{"element":"taskbar","visible":true,"position":"stackedTL"},{"element":"centerBox","visible":true,"position":"stackedBR"},{"element":"rightBox","visible":true,"position":"stackedBR"},{"element":"dateMenu","visible":true,"position":"stackedBR"},{"element":"systemMenu","visible":false,"position":"stackedBR"},{"element":"desktopButton","visible":true,"position":"stackedBR"}]}'
+panel-element-positions='{"0":[{"element":"showAppsButton","visible":false,"position":"stackedTL"},{"element":"activitiesButton","visible":false,"position":"stackedTL"},{"element":"leftBox","visible":true,"position":"stackedTL"},{"element":"taskbar","visible":true,"position":"stackedTL"},{"element":"centerBox","visible":true,"position":"stackedBR"},{"element":"rightBox","visible":true,"position":"stackedBR"},{"element":"dateMenu","visible":true,"position":"stackedBR"},{"element":"systemMenu","visible":true,"position":"stackedBR"},{"element":"desktopButton","visible":true,"position":"stackedBR"}]}'
 dot-position='BOTTOM'
 show-appmenu=false
 group-apps=true
@@ -5702,6 +5702,18 @@ animate-appicon-hover=false
 show-showdesktop-button=true
 trans-use-custom-opacity=true
 trans-panel-opacity=0.9
+# Pink accent matching GNOME's 'pink' accent-color
+focus-highlight=true
+focus-highlight-color='rgba(255, 107, 129, 0.35)'
+focus-highlight-opacity=35
+dot-color-override=true
+dot-color-1='#ff6b81'
+dot-color-2='#ff6b81'
+dot-color-3='#ff6b81'
+dot-color-4='#ff6b81'
+highlight-appicon-hover=true
+highlight-appicon-hover-background-color='rgba(255, 107, 129, 0.15)'
+highlight-appicon-pressed-background-color='rgba(255, 107, 129, 0.25)'
 DTP
 
 
@@ -5721,6 +5733,17 @@ menu-button-position-offset=0
 multi-monitor=false
 enable-menu-hotkey=true
 menu-hotkey='Super_L'
+# Pink accent theme matching GNOME's 'pink' accent-color
+enable-custom-arc-menu=true
+menu-color='rgba(40, 24, 32, 0.98)'
+menu-foreground-color='rgba(255, 255, 255, 1)'
+highlight-color='rgba(255, 107, 129, 0.30)'
+highlight-foreground-color='rgba(255, 255, 255, 1)'
+border-color='rgba(255, 107, 129, 0.40)'
+separator-color='rgba(255, 107, 129, 0.25)'
+indicator-color='rgb(255, 107, 129)'
+menu-border-size=1
+menu-corner-radius=8
 ARCM
 
 # Screen Autorotate - sane defaults for 360 deg convertibles
@@ -5786,6 +5809,17 @@ apply_niix_panel_settings() {
     dconf write $AM/custom-menu-button-icon-size 28.0
     dconf write $AM/enable-menu-hotkey "true"
     dconf write $AM/menu-hotkey "'Super_L'"
+    # Pink accent theme (must match dconf load block + niix-panel-fix)
+    dconf write $AM/enable-custom-arc-menu "true"
+    dconf write $AM/menu-color "'rgba(40, 24, 32, 0.98)'"
+    dconf write $AM/menu-foreground-color "'rgba(255, 255, 255, 1)'"
+    dconf write $AM/highlight-color "'rgba(255, 107, 129, 0.30)'"
+    dconf write $AM/highlight-foreground-color "'rgba(255, 255, 255, 1)'"
+    dconf write $AM/border-color "'rgba(255, 107, 129, 0.40)'"
+    dconf write $AM/separator-color "'rgba(255, 107, 129, 0.25)'"
+    dconf write $AM/indicator-color "'rgb(255, 107, 129)'"
+    dconf write $AM/menu-border-size 1
+    dconf write $AM/menu-corner-radius 8
     DTP=/org/gnome/shell/extensions/dash-to-panel
     dconf write $DTP/multi-monitors "false"
     # Per-monitor dicts (panel-element-positions, panel-anchors, ...) are NOT
@@ -5818,7 +5852,9 @@ PANELDT
 # for ~45s at each login to outlast dash-to-panel's own start-up save.
 sudo tee /usr/local/bin/niix-panel-fix > /dev/null <<'NIIXPANELFIX'
 #!/usr/bin/env python3
-# niix-panel-fix - keep dash-to-panel's Show Applications (9-dot) button hidden
+# niix-panel-fix - keep the NiiX panel layout in place at every login:
+#   * dash-to-panel: Show Apps/Activities hidden, system menu VISIBLE, per monitor
+#   * ArcMenu: NiiX-branded menu button (Icon+Text 'NiiX', downloaded logo icon)
 #   niix-panel-fix           apply once
 #   niix-panel-fix --watch   apply repeatedly for ~45s (used at login)
 import ast, json, subprocess, sys, time
@@ -5833,7 +5869,7 @@ NIIX_ELEMENTS = [
     {"element": "centerBox", "visible": True, "position": "stackedBR"},
     {"element": "rightBox", "visible": True, "position": "stackedBR"},
     {"element": "dateMenu", "visible": True, "position": "stackedBR"},
-    {"element": "systemMenu", "visible": False, "position": "stackedBR"},
+    {"element": "systemMenu", "visible": True, "position": "stackedBR"},
     {"element": "desktopButton", "visible": True, "position": "stackedBR"},
 ]
 MISSING_DEFAULTS = {
@@ -5842,6 +5878,11 @@ MISSING_DEFAULTS = {
     "panel-lengths": 100,
     "panel-anchors": "LEFT",
 }
+# Elements that must stay visible - enforced at every login (e.g. the system
+# menu is part of the NiiX layout and must not end up hidden by a stale
+# panel-element-positions entry or an extension reset).
+SHOW = ("leftBox", "taskbar", "centerBox", "rightBox", "dateMenu",
+        "systemMenu", "desktopButton")
 
 
 def dconf_read(key):
@@ -5905,7 +5946,93 @@ def fixed_elements(current):
     for e in current:
         if e.get("element") in HIDE:
             e["visible"] = False
+        elif e.get("element") in SHOW:
+            e["visible"] = True
     return current
+
+
+ARCMENU_BASE = "/org/gnome/shell/extensions/arcmenu/"
+# Written only when they differ - cheap at login, and survives ArcMenu's
+# first-run / update-time settings resets (which otherwise wipe the NiiX
+# branding that the installer and niix-panel-once.sh already applied).
+ARCMENU_WANTED = [
+    ("menu-button-appearance", "Icon_Text"),
+    ("custom-menu-button-text", "NiiX"),
+    ("menu-button-icon", "Custom_Icon"),
+    ("custom-menu-button-icon", "/usr/share/pixmaps/niixarch-logo.png"),
+    ("custom-menu-button-icon-size", "28.0"),
+    ("position-in-panel", "Left"),
+    ("menu-layout", "Redmond"),
+    # Pink accent theme (must match the dconf load block)
+    ("enable-custom-arc-menu", "true"),
+    ("menu-color", "rgba(40, 24, 32, 0.98)"),
+    ("menu-foreground-color", "rgba(255, 255, 255, 1)"),
+    ("highlight-color", "rgba(255, 107, 129, 0.30)"),
+    ("highlight-foreground-color", "rgba(255, 255, 255, 1)"),
+    ("border-color", "rgba(255, 107, 129, 0.40)"),
+    ("separator-color", "rgba(255, 107, 129, 0.25)"),
+    ("indicator-color", "rgb(255, 107, 129)"),
+    ("menu-border-size", "1"),
+    ("menu-corner-radius", "8"),
+]
+
+# Dash-to-panel pink accent colors (must match the dconf load block).
+# dash-to-panel does not reset its own colours at login, but enforcing
+# them here means the layout stays locked even if the user experiments
+# with the settings GUI and forgets to change them back.
+DTP_COLORS = [
+    ("focus-highlight", "true"),
+    ("focus-highlight-color", "rgba(255, 107, 129, 0.35)"),
+    ("focus-highlight-opacity", "35"),
+    ("dot-color-override", "true"),
+    ("dot-color-1", "#ff6b81"),
+    ("dot-color-2", "#ff6b81"),
+    ("dot-color-3", "#ff6b81"),
+    ("dot-color-4", "#ff6b81"),
+    ("highlight-appicon-hover", "true"),
+    ("highlight-appicon-hover-background-color", "rgba(255, 107, 129, 0.15)"),
+    ("highlight-appicon-pressed-background-color", "rgba(255, 107, 129, 0.25)"),
+]
+
+
+def apply_arcmenu():
+    for key, wanted in ARCMENU_WANTED:
+        try:
+            out = subprocess.run(["dconf", "read", ARCMENU_BASE + key],
+                                 capture_output=True, text=True,
+                                 timeout=10).stdout.strip()
+        except Exception:
+            continue
+        cur = out
+        if out.startswith("'"):
+            try:
+                cur = str(ast.literal_eval(out))
+            except Exception:
+                pass
+        if cur != wanted:
+            val = "'" + wanted.replace("\\", "\\\\").replace("'", "\\'") + "'"
+            subprocess.run(["dconf", "write", ARCMENU_BASE + key, val], timeout=10,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def apply_dtp_colors():
+    for key, wanted in DTP_COLORS:
+        try:
+            out = subprocess.run(["dconf", "read", BASE + key],
+                                 capture_output=True, text=True,
+                                 timeout=10).stdout.strip()
+        except Exception:
+            continue
+        cur = out
+        if out.startswith("'"):
+            try:
+                cur = str(ast.literal_eval(out))
+            except Exception:
+                pass
+        if cur != wanted:
+            val = "'" + wanted.replace("\\", "\\\\").replace("'", "\\'") + "'"
+            subprocess.run(["dconf", "write", BASE + key, val], timeout=10,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def apply():
@@ -5935,9 +6062,13 @@ def main():
     if "--watch" in sys.argv[1:]:
         for _ in range(15):
             apply()
+            apply_arcmenu()
+            apply_dtp_colors()
             time.sleep(3)
     else:
         apply()
+        apply_arcmenu()
+        apply_dtp_colors()
 
 
 if __name__ == "__main__":
@@ -5953,7 +6084,7 @@ X-GNOME-Autostart-enabled=true
 NoDisplay=true
 PANELFIXDT
 /usr/local/bin/niix-panel-fix 2>/dev/null || true
-log "Dash-to-panel: 9-dot Show Apps button hidden on every monitor (re-checked at each login)"
+log "NiiX panel locked in: Show Apps hidden, system menu visible, ArcMenu NiiX button (re-checked at each login)"
 
 # -- initramfs hook sets ------------------------------------
 # encrypt  (busybox) reads cryptdevice=   - what the installer's Limine entry uses
