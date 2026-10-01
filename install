@@ -6424,18 +6424,68 @@ info "Starting Flatpak downloads in the background (they run while the AUR packa
 sudo flatpak remote-add --if-not-exists flathub \
     https://dl.flathub.org/repo/flathub.flatpakrepo || warn "Could not add Flathub remote"
 
-flatpak_install() { sudo flatpak install -y --noninteractive flathub "$1"; }
+FLATPAK_APPS="com.stremio.Stremio com.ktechpit.whatsie com.heroicgameslauncher.hgl net.davidotek.pupgui2"
+
+# Retry each app a few times: a transient DNS hiccup ("Could not resolve
+# hostname") or a CDN timeout mid-pull must not silently kill the install.
+# Partial pulls resume, so retries are cheap.
+flatpak_install() {
+    local app="$1" attempt=1
+    while [ "$attempt" -le 3 ]; do
+        if sudo flatpak install -y --noninteractive flathub "$app"; then
+            return 0
+        fi
+        warn "$app: attempt $attempt/3 failed, retrying in 5s..."
+        sleep 5
+        attempt=$(( attempt + 1 ))
+    done
+    warn "$app failed after 3 attempts"
+    return 1
+}
+
+# NetworkManager can report 'full' connectivity while a fresh lookup for
+# dl.flathub.org still fails - starting the downloads against a half-ready
+# resolver is what caused the long stalls. Wait for the CDN for real.
+wait_for_flathub() {
+    local attempt=1
+    until curl -fsI --max-time 10 https://dl.flathub.org/repo/config &>/dev/null; do
+        if [ "$attempt" -ge 12 ]; then
+            warn "flathub not reachable after ~1 minute - trying anyway"
+            return 1
+        fi
+        echo -ne "\r  -  Waiting for flathub (DNS/CDN)... ($attempt/12)"
+        sleep 5
+        attempt=$(( attempt + 1 ))
+    done
+    echo ""
+    return 0
+}
 
 FLATPAK_LOG=$(mktemp /tmp/niix-flatpak-XXXXXX.log 2>/dev/null) || FLATPAK_LOG=""
 FLATPAK_PID=""
 flatpak_batch() {
-    run_once flatpak-stremio  flatpak_install com.stremio.Stremio || true
-    run_once flatpak-whatsie  flatpak_install com.ktechpit.whatsie \
-        || warn "Whatsie (Flatpak) failed - retry later: flatpak install flathub com.ktechpit.whatsie"
-    run_once flatpak-heroic   flatpak_install com.heroicgameslauncher.hgl \
-        || warn "Heroic (Flatpak) failed - retry later: flatpak install flathub com.heroicgameslauncher.hgl"
-    run_once flatpak-protonup flatpak_install net.davidotek.pupgui2 \
-        || warn "ProtonUp-Qt (Flatpak) failed - retry later: flatpak install flathub net.davidotek.pupgui2"
+    wait_for_flathub || true
+    # ONE transaction for all apps: a single metadata fetch and all shared
+    # runtimes resolved once, instead of re-checking per app. Flatpak keeps
+    # going if a single ref fails; whatever is missing afterwards is retried
+    # per app (partial pulls resume).
+    local attempt=1
+    while [ "$attempt" -le 3 ]; do
+        if sudo flatpak install -y --noninteractive flathub $FLATPAK_APPS; then
+            return 0
+        fi
+        warn "Flatpak batch attempt $attempt/3 failed, retrying in 5s..."
+        sleep 5
+        attempt=$(( attempt + 1 ))
+    done
+    warn "Batch incomplete - retrying per app..."
+    local app
+    for app in $FLATPAK_APPS; do
+        sudo flatpak info "$app" &>/dev/null && continue
+        run_once "flatpak-$(echo "$app" | cut -d. -f2- | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')" \
+            flatpak_install "$app" \
+            || warn "$app failed - retry later: flatpak install flathub $app"
+    done
 }
 # Background only while passwordless sudo is active: a background job has no
 # terminal, so on a resumed run (rule already removed) sudo could not ask for
