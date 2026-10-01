@@ -1782,6 +1782,10 @@ AMDOFFLOAD
 # falls through to the next nameserver on timeout). Idempotent - safe to re-run.
 harden_dns() {
     local rc=/mnt/etc/resolv.conf
+    # /mnt/etc/resolv.conf can be an arch-chroot bind mount (EBUSY on rm, and
+    # writing through it would truncate the LIVE ISO's own resolver). Drop the
+    # mount first, then recreate the file.
+    umount "$rc" 2>/dev/null || true
     rm -f "$rc" 2>/dev/null || true
     cat /etc/resolv.conf > "$rc" 2>/dev/null || true
     grep -q '^nameserver 1\.1\.1\.1' "$rc" 2>/dev/null || echo 'nameserver 1.1.1.1' >> "$rc"
@@ -2745,8 +2749,11 @@ systemctl enable NetworkManager
 systemctl enable systemd-resolved
 
 # -- resolv.conf -> systemd-resolved stub ------------------
-# rm -f first - ln -sf will NOT overwrite a regular file on all kernels.
-rm -f /etc/resolv.conf
+# arch-chroot bind-mounts the live ISO's resolv.conf over this file, and a
+# bind-mount target can't be removed (EBUSY) - drop the mount first.
+# Then rm -f: ln -sf will NOT overwrite a regular file on all kernels.
+umount /etc/resolv.conf 2>/dev/null || true
+rm -f /etc/resolv.conf 2>/dev/null || true
 ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
 
 # -- Bluetooth - BlueZ daemon configuration ----------------
