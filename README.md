@@ -1,5 +1,7 @@
 # NiiX Arch Installer
 
+by: cuteLiLi / techniix / QuacK
+
 A fully automated Arch Linux installer that sets up a modern, gaming‑ready system with LUKS2 encryption, Btrfs snapshots, the CachyOS kernel, GNOME desktop, and a complete gaming toolchain – all with minimal user input.
 
 > **Website:** https://niixa.org
